@@ -2,10 +2,10 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { createRequire } from "node:module";
-import ExcelJS from "exceljs";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
@@ -1139,6 +1139,15 @@ app.use((error, _req, res, _next) => {
 // START SERVER
 // --------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(`Glowbell AI server running at http://localhost:${PORT}`);
-});
+// Export the Express app so Vercel can invoke it as a serverless function.
+export default app;
+
+// Keep the standalone Express server for local development.
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
+  app.listen(PORT, () => {
+    console.log(`Glowbell AI server running at http://localhost:${PORT}`);
+  });
+}
