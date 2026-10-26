@@ -1915,10 +1915,12 @@ input:focus-visible {
 }
 
 /* Search bar: mobile, tablet, iPad & iOS position fix */
-@media (max-width: 1024px) {
+@media (max-width: 760px) {
   .gb-composer {
-    bottom: 8px;
-    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    position: relative;
+    bottom: auto;
+    margin-top: auto;
+    padding-bottom: 8px;
   }
 }
 
