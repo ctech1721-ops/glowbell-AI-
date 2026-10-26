@@ -1254,9 +1254,7 @@ export default function App() {
               </button>
             </form>
 
-            <p className="gb-disclaimer">
-              AI can make mistakes. Verify important information.
-            </p>
+            
           </section>
         </main>
       </div>
