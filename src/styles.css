@@ -1955,6 +1955,45 @@ input:focus-visible {
   }
 }
 
+/* Mobile: compact search box with buttons on the right */
+@media (max-width: 520px) {
+  .gb-input-form {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .gb-textarea {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    min-height: 42px;
+    max-height: 120px;
+    flex-basis: 0;
+    order: 1;
+  }
+
+  .gb-attach-button {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 38px;
+    padding: 4px;
+    order: 2;
+  }
+
+  .gb-send {
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    order: 3;
+  }
+
+  .gb-mode-picker {
+    flex: 0 0 auto;
+    order: 0;
+  }
+}
+
 
 
 
