@@ -1924,6 +1924,37 @@ input:focus-visible {
   }
 }
 
+/* Mobile search box position fix */
+@media (max-width: 760px) {
+  .glowbell-app {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .gb-workspace {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .gb-main {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 8px;
+  }
+
+  .gb-composer {
+    position: sticky;
+    bottom: 0;
+    flex-shrink: 0;
+    margin-top: auto;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+
 
 
 
