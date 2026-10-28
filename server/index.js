@@ -51,15 +51,12 @@ const supabaseAdmin = createClient(
 );
 
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY?.trim();
-const OPENROUTER_API_KEY =
-  process.env.OPENROUTER_API_KEY?.trim();
+const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim();
 
 const TAVILY_URL = "https://api.tavily.com/search";
-const OPENROUTER_URL =
-  "https://openrouter.ai/api/v1/chat/completions";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-const MODEL =
-  process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+const MODEL = "llama-3.3-70b-versatile";
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 
@@ -738,10 +735,10 @@ Search is for internal fact-checking only. Never include URLs or citations in yo
 }
 
 // --------------------------------------------------
-// OPENROUTER
+// GROQ AI
 // --------------------------------------------------
 
-async function askOpenRouter({
+async function askGroq({
   message,
   history,
   searchContext,
@@ -751,8 +748,10 @@ async function askOpenRouter({
   imageDataUrl,
   attachmentText,
 }) {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is missing from .env");
+  if (!GROQ_API_KEY) {
+    throw new Error(
+      "GROQ_API_KEY is missing from Vercel environment variables."
+    );
   }
 
   const userContent = [
@@ -797,13 +796,11 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
     },
   ];
 
-  const response = await fetch(OPENROUTER_URL, {
+  const response = await fetch(GROQ_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${GROQ_API_KEY}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:5173",
-      "X-Title": "Glowbell AI",
     },
     body: JSON.stringify({
       model: MODEL,
@@ -816,11 +813,17 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
 
   if (!response.ok) {
     const details = await response.text();
-    console.error("OpenRouter error:", response.status, details);
+    console.error("Groq error:", response.status, details);
 
-    if (response.status === 402) {
+    if (response.status === 401) {
       throw new Error(
-        "AI service credits are unavailable. Please check your OpenRouter credits and API key limits."
+        "Groq authentication failed. Check the GROQ_API_KEY in Vercel."
+      );
+    }
+
+    if (response.status === 429) {
+      throw new Error(
+        "Groq rate limit reached. Please wait a moment and try again."
       );
     }
 
@@ -988,7 +991,7 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     service: "Glowbell AI",
     searchConfigured: Boolean(TAVILY_API_KEY),
-    aiConfigured: Boolean(OPENROUTER_API_KEY),
+    aiConfigured: Boolean(GROQ_API_KEY),
   });
 });
 
@@ -1077,7 +1080,7 @@ app.post("/api/chat", async (req, res) => {
       currentQuestion = searchData.currentQuestion;
     }
 
-    const answer = await askOpenRouter({
+    const answer = await askGroq({
       message,
       history,
       searchContext: buildSearchContext(results),
