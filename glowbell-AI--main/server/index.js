@@ -56,7 +56,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim();
 const TAVILY_URL = "https://api.tavily.com/search";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-const MODEL = "llama-3.3-70b-versatile";
+const MODEL = "openai/gpt-oss-120b";
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 
@@ -814,6 +814,9 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
   if (!response.ok) {
     const details = await response.text();
     console.error("Groq error:", response.status, details);
+    throw new Error(
+  `AI service returned status ${response.status}: ${details}`
+);
 
     if (response.status === 401) {
       throw new Error(
