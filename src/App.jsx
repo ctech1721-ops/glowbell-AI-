@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Send, UserRound, Copy, Check, Plus, Menu, MessageSquare,
   Trash2, X, PanelLeftClose, Pin, RotateCcw, Paperclip,
-  Eye, ArrowLeft, FileText, LogOut,
+  Eye, ArrowLeft, FileText, LogOut,StickyNote,
 } from "lucide-react";
 
 import ReactMarkdown from "react-markdown";
@@ -16,6 +16,8 @@ import ReportProblem from "./ReportProblem";
 import Auth from "./Auth";
 import { supabase } from "./supabaseClient";
 import OwnerDashboard from "./OwnerDashboard";
+import NotesWidget from "./NotesWidget";
+
 
 const suggestions = [
   "Explain artificial intelligence simply",
@@ -831,6 +833,7 @@ export default function App() {
 
   return (
     <div className="glowbell-app gb-with-sidebar">
+      <NotesWidget userId={authUser.id} />
       {viewerImageUrl && (
         <div className="gb-image-viewer">
           <button type="button" className="gb-image-back" onClick={() => setViewerImageUrl("")}>
@@ -1227,6 +1230,9 @@ export default function App() {
                 <Paperclip size={19} />
               </button>
 
+              
+              
+
               <textarea
                 ref={inputRef}
                 className="gb-textarea"
@@ -1243,6 +1249,18 @@ export default function App() {
                 rows={1}
                 disabled={loading}
               />
+
+              <button
+  className="gb-notes-search-btn"
+  type="button"
+  title="Open Notepad"
+  aria-label="Open Notepad"
+  onClick={() =>
+    window.dispatchEvent(new CustomEvent("glowbell-open-notes"))
+  }
+>
+  <StickyNote size={20} />
+</button>
 
               <button
                 className="gb-send"
