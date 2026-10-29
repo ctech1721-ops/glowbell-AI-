@@ -685,7 +685,7 @@ function buildSystemPrompt({
   }).format(new Date());
 
   return `
-You are Glowbell AI, a helpful and accurate AI assistant.
+You are Global AI, a helpful and accurate AI assistant.
 
 Today's date is ${today} in the Asia/Kolkata timezone.
 
@@ -989,7 +989,7 @@ app.get("/api/owner/users", async (req, res) => {
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    service: "Glowbell AI",
+    service: "Global AI",
     searchConfigured: Boolean(TAVILY_API_KEY),
     aiConfigured: Boolean(GROQ_API_KEY),
   });
@@ -1096,7 +1096,7 @@ app.post("/api/chat", async (req, res) => {
     console.error("Chat route error:", error);
 
     return res.status(500).json({
-      error: error.message || "Glowbell AI could not complete the request.",
+      error: error.message || "Global AI could not complete the request.",
     });
   }
 });
@@ -1151,6 +1151,6 @@ if (
   pathToFileURL(process.argv[1]).href === import.meta.url
 ) {
   app.listen(PORT, () => {
-    console.log(`Glowbell AI server running at http://localhost:${PORT}`);
+    console.log(`Global AI server running at http://localhost:${PORT}`);
   });
 }
