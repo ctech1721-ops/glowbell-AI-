@@ -136,7 +136,7 @@ export default function Auth({ onLogin, onOwnerLogin }) {
           boxShadow: "0 8px 40px #29204a18",
         }}
       >
-        <h1 style={{ marginTop: 0 }}>Glowbell AI</h1>
+        <h1 style={{ marginTop: 0 }}>Global AI</h1>
 
         <p>
           {mode === "signup"
@@ -246,7 +246,7 @@ export default function Auth({ onLogin, onOwnerLogin }) {
         >
           {mode === "signup"
             ? "Already have an account? Log in"
-            : "New to Glowbell AI? Create account"}
+            : "New to Global  AI? Create account"}
         </button>
       </form>
     </main>
