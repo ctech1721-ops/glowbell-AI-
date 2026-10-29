@@ -49,7 +49,7 @@ input:focus-visible {
   outline-offset: 3px;
 }
 
-.glowbell-app {
+.global-app {
   --panel: rgba(15, 24, 52, 0.82);
   --muted: #a5b0d0;
   --line: rgba(166, 180, 255, 0.15);
@@ -1406,7 +1406,7 @@ input:focus-visible {
 }
 
 
-/* Glowbell AI - Math rendering fix */
+/* Global AI - Math rendering fix */
 
 .gb-message-body {
   flex: 1 1 0;
@@ -1501,7 +1501,7 @@ input:focus-visible {
 }
 
 
-/* Glowbell AI - Responsive long math formulas */
+/* Global AI - Responsive long math formulas */
 
 .gb-message-text {
   min-width: 0;
@@ -1646,7 +1646,7 @@ input:focus-visible {
 }
 
 
-/* Fix long KaTeX formulas in Glowbell AI */
+/* Fix long KaTeX formulas in Global AI */
 .gb-message-body {
   min-width: 0;
   max-width: 100%;
@@ -1926,7 +1926,7 @@ input:focus-visible {
 
 /* Mobile search box position fix */
 @media (max-width: 760px) {
-  .glowbell-app {
+  .global-app {
     height: 100vh;
     height: 100dvh;
     min-height: 0;
@@ -1996,7 +1996,7 @@ input:focus-visible {
 
 
 /* ==========================================
-   GLOWBELL AI - FLOATING NOTEPAD
+   GLOBAL AI - FLOATING NOTEPAD
    Paste this at the END of your existing CSS
 ========================================== */
 
@@ -2740,5 +2740,6 @@ input:focus-visible {
   background: rgba(128, 128, 128, 0.14);
   color: var(--accent-color, #7c5cff);
 }
+
 
 

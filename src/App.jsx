@@ -257,7 +257,7 @@ export default function App() {
 
     try {
       setPinnedChats(
-        JSON.parse(localStorage.getItem(`Global-pinned-chats-${authUser.id}`) || "[]")
+        JSON.parse(localStorage.getItem(`global-pinned-chats-${authUser.id}`) || "[]")
       );
     } catch {
       setPinnedChats([]);
@@ -268,7 +268,7 @@ export default function App() {
     if (!authUser?.id) return;
     try {
       localStorage.setItem(
-        `Global-pinned-chats-${authUser.id}`,
+        `global-pinned-chats-${authUser.id}`,
         JSON.stringify(pinnedChats)
       );
     } catch (err) {
@@ -832,7 +832,7 @@ export default function App() {
   }
 
   return (
-    <div className="Global-app gb-with-sidebar">
+    <div className="global-app gb-with-sidebar">
       <NotesWidget userId={authUser.id} />
       {viewerImageUrl && (
         <div className="gb-image-viewer">
@@ -1256,7 +1256,7 @@ export default function App() {
   title="Open Notepad"
   aria-label="Open Notepad"
   onClick={() =>
-    window.dispatchEvent(new CustomEvent("Global-open-notes"))
+    window.dispatchEvent(new CustomEvent("global-open-notes"))
   }
 >
   <StickyNote size={20} />

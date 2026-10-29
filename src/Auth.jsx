@@ -246,7 +246,7 @@ export default function Auth({ onLogin, onOwnerLogin }) {
         >
           {mode === "signup"
             ? "Already have an account? Log in"
-            : "New to Global  AI? Create account"}
+            : "New to Global AI? Create account"}
         </button>
       </form>
     </main>

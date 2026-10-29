@@ -814,6 +814,9 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
   if (!response.ok) {
     const details = await response.text();
     console.error("Groq error:", response.status, details);
+    throw new Error(
+  `AI service returned status ${response.status}: ${details}`
+);
 
     if (response.status === 401) {
       throw new Error(
