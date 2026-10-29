@@ -167,10 +167,10 @@ async function createExcelDownload(excelData) {
   const blob = await response.blob();
   if (!blob.size) throw new Error("The generated Excel file is empty.");
 
-  const fileName = String(excelData.fileName || "Glowbell-Excel")
+  const fileName = String(excelData.fileName || "Global-Excel")
     .replace(/\.xlsx$/i, "")
     .replace(/[^a-z0-9_-]/gi, "-")
-    .slice(0, 80) || "Glowbell-Excel";
+    .slice(0, 80) || "Global-Excel";
 
   return {
     excelDownloadUrl: URL.createObjectURL(blob),
@@ -257,7 +257,7 @@ export default function App() {
 
     try {
       setPinnedChats(
-        JSON.parse(localStorage.getItem(`glowbell-pinned-chats-${authUser.id}`) || "[]")
+        JSON.parse(localStorage.getItem(`Global-pinned-chats-${authUser.id}`) || "[]")
       );
     } catch {
       setPinnedChats([]);
@@ -268,7 +268,7 @@ export default function App() {
     if (!authUser?.id) return;
     try {
       localStorage.setItem(
-        `glowbell-pinned-chats-${authUser.id}`,
+        `Global-pinned-chats-${authUser.id}`,
         JSON.stringify(pinnedChats)
       );
     } catch (err) {
@@ -435,7 +435,7 @@ export default function App() {
       if (!data.answer) throw new Error("The AI returned an empty answer.");
 
       let excelDownloadUrl = null;
-      let excelFileName = "Glowbell-Excel";
+      let excelFileName = "Global-Excel";
 
       if (data.excelData) {
         const result = await createExcelDownload(data.excelData);
@@ -463,7 +463,7 @@ export default function App() {
       setSelectedAttachment(null);
       await saveConversation(chatId, updatedMessages);
     } catch (err) {
-      setError(err.message || "Could not connect to Glowbell AI. Check that the server is running.");
+      setError(err.message || "Could not connect to Global AI. Check that the server is running.");
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -616,7 +616,7 @@ export default function App() {
       if (!data.answer) throw new Error("The AI returned an empty answer.");
 
       let excelDownloadUrl = null;
-      let excelFileName = "Glowbell-Excel";
+      let excelFileName = "Global-Excel";
 
       if (data.excelData) {
         const result = await createExcelDownload(data.excelData);
@@ -805,7 +805,7 @@ export default function App() {
   }
 
   if (isOwnerRoute) return <OwnerDashboard />;
-  if (!authReady) return <div>Loading Glowbell AI...</div>;
+  if (!authReady) return <div>Loading Global AI...</div>;
 
   if (!authUser && !isOwner) {
     return (
@@ -832,7 +832,7 @@ export default function App() {
   }
 
   return (
-    <div className="glowbell-app gb-with-sidebar">
+    <div className="Global-app gb-with-sidebar">
       <NotesWidget userId={authUser.id} />
       {viewerImageUrl && (
         <div className="gb-image-viewer">
@@ -983,7 +983,7 @@ export default function App() {
               <div className="gb-eyebrow">YOUR PERSONAL AI ASSISTANT</div>
               <h1>Ideas start here.<br /><span>Let&apos;s explore together.</span></h1>
               <p className="gb-welcome-description">
-                Ask questions, learn something new, or write code with Glowbell AI.
+                Ask questions, learn something new, or write code with Global AI.
               </p>
               <div className="gb-suggestions">
                 {suggestions.map((suggestion) => (
@@ -1012,7 +1012,7 @@ export default function App() {
 
                   <div className="gb-message-body">
                     <div className="gb-message-author">
-                      <span>{message.role === "user" ? "You" : "Glowbell AI"}</span>
+                      <span>{message.role === "user" ? "You" : "Global AI"}</span>
                       {message.role === "user" && (
                         <button
                           type="button"
@@ -1061,7 +1061,7 @@ export default function App() {
                       {message.excelDownloadUrl && (
                         <a
                           href={message.excelDownloadUrl}
-                          download={`${message.excelFileName || "Glowbell-Excel"}.xlsx`}
+                          download={`${message.excelFileName || "Global-Excel"}.xlsx`}
                           className="gb-excel-download"
                         >
                           Download Excel
@@ -1141,7 +1141,7 @@ export default function App() {
                 <article className="gb-message gb-ai-message">
                   <div className="gb-avatar" />
                   <div className="gb-message-body">
-                    <div className="gb-message-author">Glowbell AI</div>
+                    <div className="gb-message-author">Global AI</div>
                     <div className="gb-thinking">
                       <span /><span /><span />
                       <span className="gb-thinking-text">Thinking...</span>
@@ -1244,8 +1244,8 @@ export default function App() {
                     handleSubmit(event);
                   }
                 }}
-                placeholder="Ask Glowbell AI a question..."
-                aria-label="Message Glowbell AI"
+                placeholder="Ask Global AI a question..."
+                aria-label="Message Global AI"
                 rows={1}
                 disabled={loading}
               />
@@ -1256,7 +1256,7 @@ export default function App() {
   title="Open Notepad"
   aria-label="Open Notepad"
   onClick={() =>
-    window.dispatchEvent(new CustomEvent("glowbell-open-notes"))
+    window.dispatchEvent(new CustomEvent("Global-open-notes"))
   }
 >
   <StickyNote size={20} />
