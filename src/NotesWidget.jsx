@@ -24,7 +24,7 @@ const makeNote = () => ({
 });
 
 export default function NotesWidget({ userId }) {
-  const storageKey = `glowbell-notes-${userId || "guest"}`;
+  const storageKey = `Global -notes-${userId || "guest"}`;
 
   const [notes, setNotes] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -131,10 +131,10 @@ export default function NotesWidget({ userId }) {
       }
     };
 
-    window.addEventListener("glowbell-open-notes", handleOpenNotes);
+    window.addEventListener("Global -open-notes", handleOpenNotes);
 
     return () => {
-      window.removeEventListener("glowbell-open-notes", handleOpenNotes);
+      window.removeEventListener("Global -open-notes", handleOpenNotes);
     };
   }, [activeId, notes]);
 
@@ -217,7 +217,7 @@ export default function NotesWidget({ userId }) {
 
     const safeName =
       title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 80) ||
-      "Glowbell-Note";
+      "Global -Note";
 
     pdf.save(`${safeName}.pdf`);
     setMenuOpen(false);
@@ -234,7 +234,7 @@ export default function NotesWidget({ userId }) {
             isFullscreen ? "gb-notes-fullscreen" : ""
           }`}
           role="dialog"
-          aria-label="Glowbell Notepad"
+          aria-label="Global  Notepad"
         >
           <header className="gb-notes-header">
             <div className="gb-notes-header-left">
@@ -244,7 +244,7 @@ export default function NotesWidget({ userId }) {
 
               <div>
                 <h2 className="gb-notes-header-title">
-                  Glowbell Notepad
+                  Global Notepad
                 </h2>
 
                 <div className="gb-notes-header-subtitle">
