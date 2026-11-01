@@ -1,0 +1,69 @@
+.welcome-guide {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f4f6fb;
+  color: #172033;
+}
+
+.welcome-guide-card {
+  width: 100%;
+  max-width: 560px;
+  padding: 32px;
+  border: 1px solid #dce1eb;
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 12px 40px #00000014;
+}
+
+.welcome-guide-brand {
+  color: #536dfe;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.welcome-guide-card h1 {
+  font-size: 30px;
+  line-height: 1.3;
+}
+
+.welcome-guide-card p,
+.welcome-guide-card li {
+  line-height: 1.7;
+}
+
+.welcome-guide-card li {
+  margin-bottom: 10px;
+}
+
+.welcome-guide-card button {
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 10px;
+  background: #536dfe;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.welcome-guide-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.welcome-guide-card button.welcome-guide-secondary {
+  border: 1px solid #dce1eb;
+  background: white;
+  color: #172033;
+}
+
+.welcome-guide-page {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 12px;
+}
