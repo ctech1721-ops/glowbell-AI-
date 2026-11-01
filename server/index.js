@@ -686,20 +686,57 @@ function isContextualFollowUp(message) {
 
 function parseGeneratedFiles(content) {
   let raw = String(content || "").trim();
-  raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+
+  raw = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+
   const parsed = JSON.parse(raw);
+
   const files = {};
+
   for (const [name, value] of Object.entries(parsed.files || {})) {
     const safeName = String(name).replace(/\\/g, "/");
-    if (!safeName || safeName.startsWith("/") || safeName.split("/").includes("..")) continue;
-    if (typeof value === "string" && value.length <= 250000) files[safeName] = value;
+
+    if (
+      !safeName ||
+      safeName.startsWith("/") ||
+      safeName.split("/").includes("..")
+    ) {
+      continue;
+    }
+
+    if (typeof value === "string" && value.length <= 250000) {
+      files[safeName] = value;
+    }
   }
-  for (const fileName of ["index.html", "style.css", "script.js"]) {
-  if (typeof files[fileName] !== "string" || !files[fileName].trim()) {
-    throw new Error(`Generated website is missing ${fileName}.`);
+
+  if (!files["index.html"]?.trim()) {
+    throw new Error("Generated website is missing index.html.");
   }
-}
-  return { name: String(parsed.name || "my-website").replace(/[^a-z0-9_-]/gi, "-").slice(0, 48), files };
+
+  // Add fallback files if AI forgets to generate them.
+  if (!files["style.css"]?.trim()) {
+    files["style.css"] = `
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+    `;
+  }
+
+  if (!files["script.js"]?.trim()) {
+    files["script.js"] = `
+      console.log("Website loaded successfully.");
+    `;
+  }
+
+  return {
+    name: String(parsed.name || "my-website")
+      .replace(/[^a-z0-9_-]/gi, "-")
+      .slice(0, 48),
+    files,
+  };
 }
 
 
@@ -759,48 +796,14 @@ IMPORTANT:
         },
       ],
       temperature: 0.2,
-      max_completion_tokens: 10000,
-      reasoning_format: "hidden",
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "website_files",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              name: {
-                type: "string",
-              },
-              files: {
-                type: "object",
-                properties: {
-                  "index.html": {
-                    type: "string",
-                  },
-                  "style.css": {
-                    type: "string",
-                  },
-                  "script.js": {
-                    type: "string",
-                  },
-                },
-                required: [
-                  "index.html",
-                  "style.css",
-                  "script.js",
-                ],
-                additionalProperties: false,
-              },
-            },
-            required: ["name", "files"],
-            additionalProperties: false,
-          },
-        },
-      },
-    }),
-    signal: AbortSignal.timeout(90000),
-  });
+max_completion_tokens: 10000,
+reasoning_format: "hidden",
+response_format: {
+  type: "json_object",
+},
+}),
+signal: AbortSignal.timeout(90000),
+});
 
   if (!response.ok) {
     const details = await response.text();
