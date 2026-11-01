@@ -817,6 +817,25 @@ CRITICAL HTML OUTPUT RULES:
 - script.js MUST contain valid JavaScript.
 - Use real HTML anchor links such as href="#menu", not Markdown links.
 - Return all three files as JSON string values.
+
+IMAGE AND BACKGROUND REQUIREMENTS:
+
+- Every website must include relevant real images based on the user's website idea.
+- Select images that match the website category and content.
+- Use working, publicly accessible image URLs from Unsplash (images.unsplash.com).
+- Add a large, attractive background image in the hero section.
+- Add a suitable dark or light overlay over background images so text is readable.
+- Add relevant images to product cards, service cards, portfolio sections and other suitable sections.
+- Use high-quality images with proper object-fit: cover.
+- Add rounded corners and professional image styling.
+- Use different relevant images instead of repeating the same image everywhere.
+- Add responsive background images for mobile and desktop.
+- Use CSS background-image where appropriate and HTML img tags for content images.
+- Never leave image areas empty.
+- Never use broken image links, random images or unrelated images.
+- If a suitable image URL is unavailable, use a beautiful CSS background as a fallback.
+- Make the overall website visually rich and image-focused.
+- The images and background must match the user's exact website idea.
 `;
 
   const response = await fetch(GROQ_URL, {
