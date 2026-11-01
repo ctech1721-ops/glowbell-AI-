@@ -694,31 +694,146 @@ function parseGeneratedFiles(content) {
     if (!safeName || safeName.startsWith("/") || safeName.split("/").includes("..")) continue;
     if (typeof value === "string" && value.length <= 250000) files[safeName] = value;
   }
-  if (typeof files["index.html"] !== "string") throw new Error("Generated website is missing index.html.");
+  for (const fileName of ["index.html", "style.css", "script.js"]) {
+  if (typeof files[fileName] !== "string" || !files[fileName].trim()) {
+    throw new Error(`Generated website is missing ${fileName}.`);
+  }
+}
   return { name: String(parsed.name || "my-website").replace(/[^a-z0-9_-]/gi, "-").slice(0, 48), files };
 }
 
+
 async function generateWebsiteFiles(prompt) {
-  if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured.");
-  const system = `You are an expert frontend developer. Generate a complete, polished, responsive website from the user's description. Return ONLY valid JSON, no markdown fences and no explanation, in this exact shape: {"name":"short-folder-name","files":{"index.html":"...","style.css":"...","script.js":"..."}}. Always include all three files. Use semantic accessible HTML, responsive modern CSS, and working vanilla JavaScript. Link ./style.css and ./script.js from index.html. Do not use external build tools or frameworks. Make the design visually distinctive and complete, with realistic content, navigation and functional interactions appropriate to the request. Escape JSON strings correctly.`;
+  if (!GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY is not configured.");
+  }
+
+  const system = `
+You are an expert frontend website developer.
+
+Create a complete, polished, responsive website based on the user's description.
+
+Return valid JSON matching this exact structure:
+{
+  "name": "short-folder-name",
+  "files": {
+    "index.html": "complete HTML code",
+    "style.css": "complete CSS code",
+    "script.js": "complete JavaScript code"
+  }
+}
+
+IMPORTANT:
+- Always generate all three files.
+- Put the complete HTML in index.html.
+- Put all CSS in style.css.
+- Put all JavaScript in script.js.
+- Link ./style.css and ./script.js correctly in index.html.
+- Use vanilla HTML, CSS and JavaScript only.
+- Do not use React, npm or build tools.
+- Make every navigation link and button functional.
+- Make the website responsive on mobile, tablet and desktop.
+- Use attractive colours, spacing, typography and modern design.
+- Add realistic content based on the user's description.
+- Escape quotation marks and special characters correctly in JSON strings.
+- Do not include Markdown fences or explanations.
+- Return JSON only.
+`;
+
   const response = await fetch(GROQ_URL, {
     method: "POST",
-    headers: { Authorization: `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
-      temperature: 0.35,
-      max_tokens: 7000,
-      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: system,
+        },
+        {
+          role: "user",
+          content: `Create this website: ${prompt}`,
+        },
+      ],
+      temperature: 0.2,
+      max_completion_tokens: 10000,
+      reasoning_format: "hidden",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "website_files",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+              },
+              files: {
+                type: "object",
+                properties: {
+                  "index.html": {
+                    type: "string",
+                  },
+                  "style.css": {
+                    type: "string",
+                  },
+                  "script.js": {
+                    type: "string",
+                  },
+                },
+                required: [
+                  "index.html",
+                  "style.css",
+                  "script.js",
+                ],
+                additionalProperties: false,
+              },
+            },
+            required: ["name", "files"],
+            additionalProperties: false,
+          },
+        },
+      },
     }),
     signal: AbortSignal.timeout(90000),
   });
+
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Website AI service returned status ${response.status}: ${details.slice(0, 500)}`);
+
+    console.error(
+      "Website AI error:",
+      response.status,
+      details
+    );
+
+    throw new Error(
+      `Website AI service returned status ${response.status}: ${details.slice(0, 500)}`
+    );
   }
+
   const data = await response.json();
-  return parseGeneratedFiles(data?.choices?.[0]?.message?.content);
+
+  const content = data?.choices?.[0]?.message?.content;
+
+  if (!content || typeof content !== "string") {
+    throw new Error("Website AI returned an empty response.");
+  }
+
+  const website = parseGeneratedFiles(content);
+
+  if (
+    !website.files["style.css"] ||
+    !website.files["script.js"]
+  ) {
+    throw new Error("Website generation is incomplete.");
+  }
+
+  return website;
 }
 
 function buildSystemPrompt({
