@@ -806,6 +806,17 @@ IMPORTANT:
 - Escape quotation marks and special characters correctly in JSON strings.
 - Do not include Markdown fences or explanations.
 - Return JSON only.
+
+CRITICAL HTML OUTPUT RULES:
+- index.html MUST contain real, complete HTML markup.
+- Start index.html with <!DOCTYPE html>.
+- Use actual HTML tags such as <html>, <head>, <body>, <header>, <nav>, <main>, <section>, <h1>, <p>, <a>, and <footer>.
+- NEVER write Markdown headings, Markdown links, Markdown bullet lists, or plain text in index.html.
+- NEVER put HTML inside Markdown code fences.
+- style.css MUST contain complete, colourful CSS with a designed layout, backgrounds, typography, buttons, cards, hover effects and responsive mobile styling.
+- script.js MUST contain valid JavaScript.
+- Use real HTML anchor links such as href="#menu", not Markdown links.
+- Return all three files as JSON string values.
 `;
 
   const response = await fetch(GROQ_URL, {
