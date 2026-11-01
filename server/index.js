@@ -687,14 +687,23 @@ function isContextualFollowUp(message) {
 function parseGeneratedFiles(content) {
   let raw = String(content || "").trim();
 
+  // Remove Markdown JSON code fences if present
   raw = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "");
 
-  const parsed = JSON.parse(raw);
+  let parsed;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.error("Generated JSON parsing error:", error.message);
+    throw new Error("AI returned invalid JSON. Please try again.");
+  }
 
   const files = {};
 
+  // Read generated files safely
   for (const [name, value] of Object.entries(parsed.files || {})) {
     const safeName = String(name).replace(/\\/g, "/");
 
@@ -711,20 +720,41 @@ function parseGeneratedFiles(content) {
     }
   }
 
+  // HTML is compulsory
   if (!files["index.html"]?.trim()) {
     throw new Error("Generated website is missing index.html.");
   }
 
-  // Add fallback files if AI forgets to generate them.
+  // CSS fallback
   if (!files["style.css"]?.trim()) {
     files["style.css"] = `
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
         font-family: Arial, sans-serif;
+        color: #222;
+        background: #f5f5f5;
+        line-height: 1.6;
+      }
+
+      section {
+        padding: 60px 20px;
+      }
+
+      h1, h2, h3 {
+        color: #333;
+      }
+
+      a, button {
+        cursor: pointer;
       }
     `;
   }
 
+  // JavaScript fallback
   if (!files["script.js"]?.trim()) {
     files["script.js"] = `
       console.log("Website loaded successfully.");
@@ -738,6 +768,7 @@ function parseGeneratedFiles(content) {
     files,
   };
 }
+
 
 
 async function generateWebsiteFiles(prompt) {
