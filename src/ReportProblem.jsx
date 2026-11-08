@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import { Flag } from "lucide-react";
 import "./ReportProblem.css";
 
 export default function ReportProblem() {
@@ -48,7 +49,7 @@ export default function ReportProblem() {
         className="report-problem-button"
         onClick={() => setIsOpen(true)}
       >
-        Report a Problem
+        <Flag size={17} /> <span>Report Issue</span>
       </button>
 
       {isOpen && (

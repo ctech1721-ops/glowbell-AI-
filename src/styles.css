@@ -2780,3 +2780,89 @@ input:focus-visible {
 @keyframes gb-earth-zoom { 0% { transform:scale(.65); opacity:0; } 18% { opacity:1; } 100% { transform:scale(1.35); opacity:0; } }
 @keyframes gb-earth-fade { 0%,82% { opacity:1; } 100% { opacity:0; visibility:hidden; } }
 @media(max-width:600px) { .gb-website-overlay { padding:10px; } .gb-website-panel { padding:17px; border-radius:15px; } .gb-website-actions button { flex:1; justify-content:center; } }
+
+/* =========================================================
+   GLOBAL AI — black & electric-blue reference redesign
+   Presentation-only overrides; existing application logic
+   and API integrations remain unchanged.
+========================================================= */
+:root { color-scheme: dark; background:#020306; --gb-line:rgba(50,151,255,.28); }
+html, body, #root { background:#020306; }
+.global-app { background:#020306 !important; color:#f7f9ff; }
+.gb-workspace { background:#020306 !important; }
+.gb-header { min-height:104px; padding:18px 30px; background:rgba(2,3,6,.96) !important; border-bottom:1px solid rgba(38,135,255,.12); }
+.gb-header-left { flex:1; min-width:0; }
+.gb-brand { display:inline-flex; align-items:center; gap:14px; color:#fff; text-decoration:none; min-width:0; }
+.gb-brand img { width:88px; height:70px; object-fit:contain; filter:drop-shadow(0 0 14px rgba(0,125,255,.65)); }
+.gb-brand span { display:flex; flex-direction:column; gap:3px; }
+.gb-brand strong { font-size:clamp(22px,2.5vw,34px); font-weight:800; letter-spacing:-1.2px; white-space:nowrap; }
+.gb-brand strong b { color:#078cff; }
+.gb-brand small { color:#aeb8cc; font-size:13px; white-space:nowrap; }
+.gb-header-actions { display:flex; align-items:center; gap:12px; }
+.gb-new-chat, .gb-header-actions button:not(.gb-menu-button) { min-height:48px; border:1px solid rgba(65,155,255,.65) !important; border-radius:28px !important; background:#03060d !important; color:#f7faff !important; box-shadow:inset 0 0 14px rgba(0,115,255,.07),0 0 14px rgba(0,105,255,.08); }
+.gb-menu-button { width:54px; height:54px; border:1px solid rgba(115,145,190,.65) !important; border-radius:50% !important; color:#fff !important; background:#03060d !important; }
+.gb-main { background:#020306 !important; padding:22px 28px 26px; }
+.gb-welcome { justify-content:center; min-height:0; padding:22px 0 30px; gap:0; }
+.gb-eyebrow { display:none; }
+.gb-hero-logo { width:clamp(190px,27vw,330px); height:clamp(170px,25vw,290px); object-fit:contain; margin:0 auto 18px; filter:drop-shadow(0 0 28px rgba(0,106,255,.45)); animation:gb-logo-float 5s ease-in-out infinite; }
+@keyframes gb-logo-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-9px)} }
+.gb-welcome h1 { margin:8px 0 12px; color:#f7f8fc; font-size:clamp(36px,5.1vw,68px); line-height:1.08; letter-spacing:-2.5px; font-weight:800; text-shadow:0 5px 30px rgba(255,255,255,.13); }
+.gb-welcome h1 span { background:linear-gradient(90deg,#10c8ff,#0875ff 75%); background-clip:text; -webkit-background-clip:text; }
+.gb-welcome-description { color:#aab9d8; font-size:clamp(15px,2vw,21px); line-height:1.55; margin:20px auto 0; }
+.gb-suggestions { display:none !important; }
+.gb-composer { position:sticky; bottom:12px; z-index:8; width:min(100%,1120px); margin:22px auto 4px; padding:0; background:transparent !important; border:0 !important; box-shadow:none !important; }
+.gb-input-form { min-height:94px; padding:10px 12px 10px 22px !important; gap:12px; border:1.5px solid #168dff !important; border-radius:60px !important; background:rgba(3,7,17,.97) !important; box-shadow:0 0 12px rgba(0,132,255,.32),inset 0 0 20px rgba(0,107,255,.08) !important; }
+.gb-textarea { color:#f6f9ff !important; font-size:19px !important; background:transparent !important; }
+.gb-textarea::placeholder { color:#8490ad !important; opacity:1; }
+.gb-attach-button, .gb-notes-search-btn { flex:0 0 48px; width:48px !important; height:48px !important; color:#fff !important; background:transparent !important; border:0 !important; }
+.gb-notes-search-btn { display:flex !important; align-items:center; justify-content:center; color:#20aaff !important; }
+.gb-send { width:76px !important; height:76px !important; flex:0 0 76px; border-radius:50% !important; color:white !important; background:linear-gradient(145deg,#10c9ff,#0759ef) !important; box-shadow:0 0 24px rgba(0,117,255,.45) !important; }
+.gb-sidebar { background:#050912 !important; border-right:1px solid rgba(28,137,255,.22) !important; }
+.gb-sidebar-footer, .gb-history-item, .gb-history-open { color:#dce8ff; }
+.gb-messages { width:min(100%,1000px); }
+.gb-message-body { background:#080e1c; border:1px solid rgba(40,135,255,.17); }
+.gb-user-message .gb-message-body { background:#071b35; border-color:rgba(0,139,255,.35); }
+.gb-notes-window { background:#050914 !important; border:1px solid rgba(0,139,255,.45) !important; box-shadow:0 0 35px rgba(0,105,255,.25) !important; color:#edf4ff !important; }
+.gb-notes-header { background:#071326 !important; border-bottom:1px solid rgba(0,139,255,.25) !important; }
+.gb-notes-history { background:#060c18 !important; }
+.gb-notes-history-item.active { background:rgba(0,126,255,.16) !important; }
+.gb-notes-title-input, .gb-notes-body-input { background:#050a14 !important; color:#edf4ff !important; border-color:rgba(67,144,255,.25) !important; }
+.gb-notes-primary-btn { background:linear-gradient(135deg,#0dbbff,#075cf0) !important; }
+@media (max-width:700px) {
+ .gb-header { min-height:78px; padding:10px 14px; gap:8px; }
+ .gb-brand { gap:7px; }
+ .gb-brand img { width:57px; height:52px; }
+ .gb-brand strong { font-size:21px; letter-spacing:-.7px; }
+ .gb-brand small { font-size:9px; }
+ .gb-header-actions { gap:6px; }
+ .gb-new-chat, .gb-header-actions button:not(.gb-menu-button) { min-height:40px; padding:0 10px !important; font-size:12px; }
+ .gb-menu-button { width:42px; height:42px; }
+ .gb-main { padding:10px 14px 16px; }
+ .gb-welcome { padding:32px 0 22px; }
+ .gb-hero-logo { width: min(68vw,260px); height:min(60vw,230px); margin-bottom:18px; }
+ .gb-welcome h1 { font-size:clamp(35px,9vw,49px); letter-spacing:-1.7px; line-height:1.12; }
+ .gb-welcome-description { max-width:340px; font-size:16px; margin-top:16px; }
+ .gb-composer { position:fixed; left:12px; right:12px; bottom:max(12px,env(safe-area-inset-bottom)); width:auto; margin:0; }
+ .gb-input-form { min-height:70px; padding:7px 8px 7px 14px !important; gap:5px; }
+ .gb-textarea { min-width:0; font-size:14px !important; }
+ .gb-attach-button { width:38px !important; flex-basis:38px; }
+ .gb-send { width:54px !important; height:54px !important; flex-basis:54px; }
+ .gb-send svg { width:20px; }
+ .gb-messages { padding-bottom:90px; }
+}
+@media (min-width:701px) and (max-width:1024px) {
+ .gb-header { padding:14px 20px; }
+ .gb-brand img { width:70px; height:62px; }
+ .gb-hero-logo { width:260px; height:235px; }
+ .gb-composer { width:94%; }
+}
+.gb-notes-search-btn { border-radius:50% !important; }
+.gb-notes-search-btn:hover { background:rgba(0,139,255,.13) !important; }
+.gb-header-actions .report-problem-button { display:inline-flex; align-items:center; justify-content:center; gap:9px; border:1px solid rgba(91,145,220,.55) !important; border-radius:28px !important; background:#03060d !important; color:#f7faff !important; box-shadow:0 0 14px rgba(0,105,255,.08) !important; }
+@media (max-width:700px) {
+ .gb-header-actions .report-problem-button { width:42px; min-width:42px; height:42px; padding:0 !important; }
+ .gb-header-actions .report-problem-button span { display:none; }
+ .gb-header-actions .report-problem-button svg { width:18px; }
+ .gb-header-actions .gb-new-chat span { display:none; }
+ .gb-header-actions .gb-new-chat { width:42px; min-width:42px; justify-content:center; padding:0 !important; }
+}

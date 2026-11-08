@@ -1094,6 +1094,16 @@ export default function App() {
       <div className="gb-workspace">
         <header className="gb-header">
           <div className="gb-header-left">
+            <a className="gb-brand" href="/" aria-label="Global AI home">
+              <img src="/global-ai-logo.png" alt="Global AI logo" />
+              <span><strong>Global <b>AI</b></strong><small>Smart · Helpful · Always Here</small></span>
+            </a>
+          </div>
+          <div className="gb-header-actions">
+            <button className="gb-new-chat" type="button" onClick={newChat} disabled={loading}>
+              <Plus size={18} /> <span>New chat</span>
+            </button>
+            <ReportProblem />
             <button
               className="gb-menu-button"
               type="button"
@@ -1104,19 +1114,13 @@ export default function App() {
               {sidebarOpen ? <X size={21} /> : <Menu size={21} />}
             </button>
           </div>
-          <div className="gb-header-actions">
-            <button className="gb-new-chat" type="button" onClick={newChat} disabled={loading}>
-              <Plus size={18} /> <span>New chat</span>
-            </button>
-            <ReportProblem />
-          </div>
         </header>
 
         <main className="gb-main">
           {messages.length === 0 ? (
             <section className="gb-welcome">
-              <div className="gb-eyebrow">YOUR PERSONAL AI ASSISTANT</div>
-              <h1>Ideas start here.<br /><span>Let&apos;s explore together.</span></h1>
+              <img className="gb-hero-logo" src="/global-ai-logo.png" alt="Global AI glowing G logo" />
+              <h1>Ideas start here.<br /><span>Let&apos;s explore</span><br />together.</h1>
               <p className="gb-welcome-description">
                 Ask questions, learn something new, or write code with Global AI.
               </p>
