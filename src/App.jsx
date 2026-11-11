@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Send, UserRound, Copy, Check, Plus, Menu, MessageSquare,
-  Trash2, X, PanelLeftClose, Pin, RotateCcw, Paperclip,
-  Eye, ArrowLeft, FileText, LogOut,StickyNote,
+  Send, UserRound, Copy, Check, Plus, Menu, MessageSquare, Globe2,
+  Trash2, X, PanelLeftClose, Pin, RotateCcw, Paperclip, Sparkles,
+  Eye, ArrowLeft, Download, FileText, LogOut,StickyNote,
 } from "lucide-react";
 
 import ReactMarkdown from "react-markdown";
@@ -17,6 +17,8 @@ import Auth from "./Auth";
 import { supabase } from "./supabaseClient";
 import OwnerDashboard from "./OwnerDashboard";
 import NotesWidget from "./NotesWidget";
+import FeatureHub from "./FeatureHub";
+import JSZip from "jszip";
 
 
 const suggestions = [
@@ -167,15 +169,24 @@ async function createExcelDownload(excelData) {
   const blob = await response.blob();
   if (!blob.size) throw new Error("The generated Excel file is empty.");
 
-  const fileName = String(excelData.fileName || "Glowbell-Excel")
+  const fileName = String(excelData.fileName || "Global-Excel")
     .replace(/\.xlsx$/i, "")
     .replace(/[^a-z0-9_-]/gi, "-")
-    .slice(0, 80) || "Glowbell-Excel";
+    .slice(0, 80) || "Global-Excel";
 
   return {
     excelDownloadUrl: URL.createObjectURL(blob),
     excelFileName: fileName,
   };
+}
+
+function EarthIntro() {
+  return (
+    <div className="gb-earth-intro" aria-label="Global AI is loading">
+      <div className="gb-earth-orbit"><div className="gb-earth-sphere" /></div>
+      <span>GLOBAL AI</span>
+    </div>
+  );
 }
 
 export default function App() {
@@ -204,6 +215,19 @@ export default function App() {
   const [error, setError] = useState("");
   const [copiedIndex, setCopiedIndex] = useState(-1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showWebsiteBuilder, setShowWebsiteBuilder] = useState(false);
+  const [showFeatureHub, setShowFeatureHub] = useState(false);
+  const [websitePrompt, setWebsitePrompt] = useState("");
+  const [websiteLoading, setWebsiteLoading] = useState(false);
+  const [websiteError, setWebsiteError] = useState("");
+  const [generatedWebsite, setGeneratedWebsite] = useState(null);
+  const [showEarthIntro, setShowEarthIntro] = useState(true);
+
+  useEffect(() => {
+    const introTimer = window.setTimeout(() => setShowEarthIntro(false), 3000);
+    return () => window.clearTimeout(introTimer);
+  }, []);
+
 
   const inputRef = useRef(null);
   const bottomRef = useRef(null);
@@ -257,7 +281,7 @@ export default function App() {
 
     try {
       setPinnedChats(
-        JSON.parse(localStorage.getItem(`glowbell-pinned-chats-${authUser.id}`) || "[]")
+        JSON.parse(localStorage.getItem(`global-pinned-chats-${authUser.id}`) || "[]")
       );
     } catch {
       setPinnedChats([]);
@@ -268,7 +292,7 @@ export default function App() {
     if (!authUser?.id) return;
     try {
       localStorage.setItem(
-        `glowbell-pinned-chats-${authUser.id}`,
+        `global-pinned-chats-${authUser.id}`,
         JSON.stringify(pinnedChats)
       );
     } catch (err) {
@@ -360,7 +384,7 @@ export default function App() {
         ["user", "assistant"].includes(item.role) &&
         typeof item.content === "string"
       )
-      .slice(-10)
+      .slice(-18)
       .map((item) => ({ role: item.role, content: item.content }));
   }
 
@@ -435,7 +459,7 @@ export default function App() {
       if (!data.answer) throw new Error("The AI returned an empty answer.");
 
       let excelDownloadUrl = null;
-      let excelFileName = "Glowbell-Excel";
+      let excelFileName = "Global-Excel";
 
       if (data.excelData) {
         const result = await createExcelDownload(data.excelData);
@@ -463,11 +487,79 @@ export default function App() {
       setSelectedAttachment(null);
       await saveConversation(chatId, updatedMessages);
     } catch (err) {
-      setError(err.message || "Could not connect to Glowbell AI. Check that the server is running.");
+      setError(err.message || "Could not connect to Global AI. Check that the server is running.");
     } finally {
       setLoading(false);
       inputRef.current?.focus();
     }
+  }
+
+
+  async function createWebsite() {
+    const prompt = websitePrompt.trim();
+    if (!prompt || websiteLoading) return;
+    setWebsiteLoading(true);
+    setWebsiteError("");
+    setGeneratedWebsite(null);
+    try {
+      const response = await fetch("/api/create-website", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Website creation failed.");
+      if (!data.files || typeof data.files["index.html"] !== "string") {
+        throw new Error("AI did not return a valid index.html. Please try a clearer description.");
+      }
+      setGeneratedWebsite({ name: data.name || "my-website", files: data.files });
+    } catch (err) {
+      setWebsiteError(err.message || "Could not create the website.");
+    } finally {
+      setWebsiteLoading(false);
+    }
+  }
+
+  function getWebsitePreview() {
+    if (!generatedWebsite) return "";
+    const files = generatedWebsite.files;
+    let html = files["index.html"];
+    const cssText = files["style.css"] || "";
+    const jsText = files["script.js"] || "";
+
+    if (cssText) {
+      const inlineStyle = `<style>\n${cssText}\n</style>`;
+      if (/<link\b[^>]*href=["'](?:\.\/)?style\.css["'][^>]*>/i.test(html)) {
+        html = html.replace(/<link\b[^>]*href=["'](?:\.\/)?style\.css["'][^>]*>/i, inlineStyle);
+      } else {
+        html = html.replace("</head>", `${inlineStyle}\n</head>`);
+      }
+    }
+    if (jsText) {
+      const inlineScript = `<script>\n${jsText}\n</script>`;
+      if (/<script\b[^>]*src=["'](?:\.\/)?script\.js["'][^>]*>\s*<\/script>/i.test(html)) {
+        html = html.replace(/<script\b[^>]*src=["'](?:\.\/)?script\.js["'][^>]*>\s*<\/script>/i, inlineScript);
+      } else {
+        html = html.replace("</body>", `${inlineScript}\n</body>`);
+      }
+    }
+    return html;
+  }
+
+  async function downloadWebsiteZip() {
+    if (!generatedWebsite) return;
+    const zip = new JSZip();
+    Object.entries(generatedWebsite.files).forEach(([fileName, content]) => zip.file(fileName, content));
+    zip.file("README.md", `# ${generatedWebsite.name}\n\nGenerated with Global AI.\n\nOpen index.html in a browser, or open this folder in VS Code to edit the HTML, CSS and JavaScript files.`);
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${generatedWebsite.name || "my-website"}.zip`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
   // --------------------------------------------------
@@ -616,7 +708,7 @@ export default function App() {
       if (!data.answer) throw new Error("The AI returned an empty answer.");
 
       let excelDownloadUrl = null;
-      let excelFileName = "Glowbell-Excel";
+      let excelFileName = "Global-Excel";
 
       if (data.excelData) {
         const result = await createExcelDownload(data.excelData);
@@ -805,17 +897,20 @@ export default function App() {
   }
 
   if (isOwnerRoute) return <OwnerDashboard />;
-  if (!authReady) return <div>Loading Glowbell AI...</div>;
+  if (!authReady) return <><div>Loading Global AI...</div>{showEarthIntro && <EarthIntro />}</>;
 
   if (!authUser && !isOwner) {
     return (
-      <Auth
-        onLogin={setAuthUser}
-        onOwnerLogin={(token) => {
-          setOwnerToken(token);
-          setIsOwner(true);
-        }}
-      />
+      <>
+        <Auth
+          onLogin={setAuthUser}
+          onOwnerLogin={(token) => {
+            setOwnerToken(token);
+            setIsOwner(true);
+          }}
+        />
+        {showEarthIntro && <EarthIntro />}
+      </>
     );
   }
 
@@ -832,7 +927,57 @@ export default function App() {
   }
 
   return (
-    <div className="glowbell-app gb-with-sidebar">
+    <div className="global-app gb-with-sidebar">
+      {showEarthIntro && <EarthIntro />}
+      {showFeatureHub && (
+        <FeatureHub
+          onClose={() => setShowFeatureHub(false)}
+          onUse={(prompt) => {
+            setShowFeatureHub(false);
+            sendMessage(prompt);
+          }}
+        />
+      )}
+      {showWebsiteBuilder && (
+        <div className="gb-website-overlay" role="dialog" aria-modal="true" aria-label="Website builder">
+          <section className="gb-website-panel">
+            <header className="gb-website-header">
+              <div><strong>Website Creator</strong><span>Describe your website in simple words</span></div>
+              <button type="button" onClick={() => setShowWebsiteBuilder(false)} aria-label="Close website creator"><X size={20} /></button>
+            </header>
+            <textarea className="gb-website-prompt" value={websitePrompt}
+              onChange={(event) => setWebsitePrompt(event.target.value)}
+              placeholder="Example: Create a modern portfolio website with a dark background, blue and purple colours, home, about, projects and contact sections..."
+              rows={5} />
+            <button className="gb-website-create" type="button" onClick={createWebsite}
+              disabled={!websitePrompt.trim() || websiteLoading}>
+              {websiteLoading ? "Creating website..." : "Create Website"}
+            </button>
+            {websiteError && <p className="gb-website-error" role="alert">{websiteError}</p>}
+            {generatedWebsite && (
+              <div className="gb-website-result">
+                <div className="gb-website-result-title">
+                  <strong>{generatedWebsite.name}</strong>
+                  <span>{Object.keys(generatedWebsite.files).join(" · ")}</span>
+                </div>
+                <div className="gb-website-actions">
+                  <button type="button" onClick={() => {
+                    const preview = window.open("", "_blank");
+                    if (preview) {
+                      preview.opener = null;
+                      preview.document.open();
+                      preview.document.write(getWebsitePreview());
+                      preview.document.close();
+                    } else setWebsiteError("Allow pop-ups to view your website preview.");
+                  }}><Eye size={16} /> View</button>
+                  <button type="button" onClick={downloadWebsiteZip}><Download size={16} /> Download ZIP</button>
+                </div>
+                <p className="gb-website-help">Download ZIP pannitu extract செய்து VS Code-la folder open pannalaam.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
       <NotesWidget userId={authUser.id} />
       {viewerImageUrl && (
         <div className="gb-image-viewer">
@@ -864,8 +1009,14 @@ export default function App() {
           </button>
         </div>
 
-        <button className="gb-sidebar-new" type="button" onClick={newChat} disabled={loading}>
-          <Plus size={18} /> New chat
+        <button className="gb-sidebar-features" type="button"
+          onClick={() => { setShowFeatureHub(true); setSidebarOpen(false); }}>
+          <Sparkles size={18} /> Explore AI Features
+        </button>
+
+        <button className="gb-sidebar-website" type="button"
+          onClick={() => { setShowWebsiteBuilder(true); setSidebarOpen(false); }}>
+          <Globe2 size={18} /> Website
         </button>
 
         <div className="gb-history-heading">
@@ -959,6 +1110,19 @@ export default function App() {
       <div className="gb-workspace">
         <header className="gb-header">
           <div className="gb-header-left">
+            <a className="gb-brand" href="/" aria-label="Global AI home">
+              <span className="gb-logo-mark"><img src="/global-ai-logo.png" alt="Global AI logo" /></span>
+              <span><strong>Global <b>AI</b></strong><small>Smart · Helpful · Always Here</small></span>
+            </a>
+          </div>
+          <div className="gb-header-actions">
+            <button className="gb-new-chat" type="button" onClick={newChat} disabled={loading}>
+              <Plus size={18} /> <span>New chat</span>
+            </button>
+            <button className="gb-feature-launch" type="button" onClick={() => setShowFeatureHub(true)}>
+              <Sparkles size={17} /> <span>AI Tools</span>
+            </button>
+            <ReportProblem />
             <button
               className="gb-menu-button"
               type="button"
@@ -969,21 +1133,15 @@ export default function App() {
               {sidebarOpen ? <X size={21} /> : <Menu size={21} />}
             </button>
           </div>
-          <div className="gb-header-actions">
-            <button className="gb-new-chat" type="button" onClick={newChat} disabled={loading}>
-              <Plus size={18} /> <span>New chat</span>
-            </button>
-            <ReportProblem />
-          </div>
         </header>
 
         <main className="gb-main">
           {messages.length === 0 ? (
             <section className="gb-welcome">
-              <div className="gb-eyebrow">YOUR PERSONAL AI ASSISTANT</div>
-              <h1>Ideas start here.<br /><span>Let&apos;s explore together.</span></h1>
+              <span className="gb-logo-mark gb-hero-logo-mark"><img className="gb-hero-logo" src="/global-ai-logo.png" alt="Global AI glowing G logo" /></span>
+              <h1>Ideas start here.<br /><span>Let&apos;s explore</span><br />together.</h1>
               <p className="gb-welcome-description">
-                Ask questions, learn something new, or write code with Glowbell AI.
+                Ask questions, learn something new, or write code with Global AI.
               </p>
               <div className="gb-suggestions">
                 {suggestions.map((suggestion) => (
@@ -1012,7 +1170,7 @@ export default function App() {
 
                   <div className="gb-message-body">
                     <div className="gb-message-author">
-                      <span>{message.role === "user" ? "You" : "Glowbell AI"}</span>
+                      <span>{message.role === "user" ? "You" : "Global AI"}</span>
                       {message.role === "user" && (
                         <button
                           type="button"
@@ -1061,7 +1219,7 @@ export default function App() {
                       {message.excelDownloadUrl && (
                         <a
                           href={message.excelDownloadUrl}
-                          download={`${message.excelFileName || "Glowbell-Excel"}.xlsx`}
+                          download={`${message.excelFileName || "Global-Excel"}.xlsx`}
                           className="gb-excel-download"
                         >
                           Download Excel
@@ -1141,7 +1299,7 @@ export default function App() {
                 <article className="gb-message gb-ai-message">
                   <div className="gb-avatar" />
                   <div className="gb-message-body">
-                    <div className="gb-message-author">Glowbell AI</div>
+                    <div className="gb-message-author">Global AI</div>
                     <div className="gb-thinking">
                       <span /><span /><span />
                       <span className="gb-thinking-text">Thinking...</span>
@@ -1244,8 +1402,8 @@ export default function App() {
                     handleSubmit(event);
                   }
                 }}
-                placeholder="Ask Glowbell AI a question..."
-                aria-label="Message Glowbell AI"
+                placeholder="Ask Global AI a question..."
+                aria-label="Message Global AI"
                 rows={1}
                 disabled={loading}
               />
@@ -1256,7 +1414,7 @@ export default function App() {
   title="Open Notepad"
   aria-label="Open Notepad"
   onClick={() =>
-    window.dispatchEvent(new CustomEvent("glowbell-open-notes"))
+    window.dispatchEvent(new CustomEvent("global-open-notes"))
   }
 >
   <StickyNote size={20} />

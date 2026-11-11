@@ -12,6 +12,7 @@ import {
   Trash2,
   Check,
   FileText,
+  Search,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 
@@ -24,7 +25,7 @@ const makeNote = () => ({
 });
 
 export default function NotesWidget({ userId }) {
-  const storageKey = `glowbell-notes-${userId || "guest"}`;
+  const storageKey = `global-notes-${userId || "guest"}`;
 
   const [notes, setNotes] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -33,6 +34,7 @@ export default function NotesWidget({ userId }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [noteSearch, setNoteSearch] = useState("");
 
   // Load saved notes
   useEffect(() => {
@@ -62,6 +64,9 @@ export default function NotesWidget({ userId }) {
   }, [notes, storageKey, loaded]);
 
   const activeNote = notes.find((note) => note.id === activeId);
+  const filteredNotes = notes.filter((note) =>
+    `${note.title || ""} ${note.content || ""}`.toLowerCase().includes(noteSearch.trim().toLowerCase())
+  );
 
   // Create a new note
   const createNote = () => {
@@ -131,10 +136,10 @@ export default function NotesWidget({ userId }) {
       }
     };
 
-    window.addEventListener("glowbell-open-notes", handleOpenNotes);
+    window.addEventListener("global-open-notes", handleOpenNotes);
 
     return () => {
-      window.removeEventListener("glowbell-open-notes", handleOpenNotes);
+      window.removeEventListener("global-open-notes", handleOpenNotes);
     };
   }, [activeId, notes]);
 
@@ -217,7 +222,7 @@ export default function NotesWidget({ userId }) {
 
     const safeName =
       title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 80) ||
-      "Glowbell-Note";
+      "Global-Note";
 
     pdf.save(`${safeName}.pdf`);
     setMenuOpen(false);
@@ -234,7 +239,7 @@ export default function NotesWidget({ userId }) {
             isFullscreen ? "gb-notes-fullscreen" : ""
           }`}
           role="dialog"
-          aria-label="Glowbell Notepad"
+          aria-label="Global Notepad"
         >
           <header className="gb-notes-header">
             <div className="gb-notes-header-left">
@@ -244,7 +249,7 @@ export default function NotesWidget({ userId }) {
 
               <div>
                 <h2 className="gb-notes-header-title">
-                  Glowbell Notepad
+                  Global Notepad
                 </h2>
 
                 <div className="gb-notes-header-subtitle">
@@ -338,6 +343,16 @@ export default function NotesWidget({ userId }) {
                 </button>
               </div>
 
+              <label className="gb-notes-search">
+                <Search size={15} />
+                <input
+                  value={noteSearch}
+                  onChange={(event) => setNoteSearch(event.target.value)}
+                  placeholder="Search your notes..."
+                  aria-label="Search notes"
+                />
+              </label>
+
               <div className="gb-notes-history-list">
                 {notes.length === 0 ? (
                   <div className="gb-notes-empty-history">
@@ -345,8 +360,13 @@ export default function NotesWidget({ userId }) {
                     <p>No notes yet.</p>
                     Create your first note.
                   </div>
+                ) : filteredNotes.length === 0 ? (
+                  <div className="gb-notes-empty-history">
+                    <Search size={20} />
+                    <p>No matching notes found.</p>
+                  </div>
                 ) : (
-                  notes.map((note) => (
+                  filteredNotes.map((note) => (
                     <div
                       key={note.id}
                       className={`gb-notes-history-item ${

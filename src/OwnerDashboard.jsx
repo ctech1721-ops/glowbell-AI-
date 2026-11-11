@@ -38,7 +38,7 @@ export default function OwnerDashboard({ token, onLogout }) {
 
   return (
     <main style={{ padding: 32 }}>
-      <h1>Glowbell Owner Dashboard</h1>
+      <h1>Global Owner Dashboard</h1>
       <p>Total registered users: {users.length}</p>
       <button onClick={onLogout}>Logout</button>
 

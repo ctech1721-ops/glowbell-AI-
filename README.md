@@ -1,77 +1,35 @@
-# Glowbell Search
+# Global AI — redesigned frontend
 
-A beginner-friendly Google-inspired search app built with React, Vite, Express, and the Brave Search API.
+This package keeps the existing React/Vite frontend, Express API, Supabase authentication and chat persistence, Groq AI integration, Tavily web search, owner dashboard, report issue flow, file attachments, website creator and notes feature. The visual layer has been redesigned around the supplied black/electric-blue Global AI reference, including the extracted glowing G logo.
 
-## Requirements
+## Run locally
 
-- Node.js 20.19+ or 22.12+
-- npm
-- A Brave Search API key for real web results
+Requirements: Node.js 20.19+ or 22.12+ and npm.
 
-## Run it locally
-
-1. Install Node.js from https://nodejs.org/ if you don't already have it.
-2. Unzip this project and open the `glowbell-search` folder in VS Code.
-3. Open a terminal in that folder and run:
+1. Open this folder in VS Code.
+2. Install dependencies:
 
    ```bash
    npm install
    ```
-
-4. Copy `.env.example` to a new file named `.env`.
-5. Open `.env` and replace `replace_with_your_key` with your Brave Search API key.
-6. Start the app:
+3. Copy `.env.example` to `.env` and fill in your existing provider/Supabase values. Never commit or share `.env`.
+4. Start frontend and backend:
 
    ```bash
    npm run dev
    ```
+5. Open http://localhost:5173.
 
-7. Open http://localhost:5173 in your browser.
+The Vite development server proxies `/api` to the Express server on port 3001. For a production build, run `npm run build`; for the standalone Express server, run `npm start`.
 
-The frontend runs on port 5173 and the backend on port 3001. Vite forwards `/api` requests to the backend during development.
+## Notes
 
-## Get a search API key
+The Notes widget is available from the notes icon in the chat composer. It supports creating notes, switching between saved notes, editing, saving, deleting, and downloading a note as PDF. Notes are stored in the browser's local storage per signed-in user, as in the supplied project; they are not synced across devices through Supabase.
 
-1. Visit https://api-dashboard.search.brave.com/
-2. Create/sign in to an account and review/activate an available plan.
-3. Create an API key.
-4. Put it in `.env` as `BRAVE_SEARCH_API_KEY=your_key_here`.
+## Deployment
 
-Brave Search API usage may be paid. Check current plan and pricing before using it. Keep the key private: do not put it in frontend code, commit `.env`, or share it in screenshots.
+The existing Express app is exported for the supplied Vercel API catch-all at `api/[...path].js`. Configure the environment variables from `.env.example` in the deployment provider. Keep secret keys server-side; only the two `VITE_` Supabase values are exposed to the browser by design. Test authentication, chat, web search, uploads and owner access in the deployed environment before publishing it to users.
 
-## Build and run production locally
+## Important
 
-```bash
-npm run build
-npm start
-```
-
-Open http://localhost:3001. The Express server serves the built frontend and the search API.
-
-## Project structure
-
-```text
-glowbell-search/
-├── server/
-│   └── index.js       # API endpoint; keeps the key on the server
-├── src/
-│   ├── App.jsx        # Search UI and result list
-│   ├── main.jsx       # React entry point
-│   └── styles.css     # Responsive visual design
-├── .env.example      # Example environment variables
-├── index.html
-├── package.json
-└── vite.config.js
-```
-
-## Troubleshooting
-
-- **"Real web search is not configured yet"**: create `.env`, add your key, and restart `npm run dev`.
-- **Port in use**: close the other app using port 3001 or set another `PORT` in `.env`; update `vite.config.js` if you change the development server port.
-- **401/403**: verify the API key and plan in your Brave dashboard.
-- **429**: wait and retry; check provider limits and usage.
-
-
-## Glowbell AI chat and web search
-
-Copy `.env.example` to `.env`, then add your own `TAVILY_API_KEY` and `OPENROUTER_API_KEY` values in `.env`. Never share `.env` or commit it to Git. Restart `npm run dev` after editing environment variables. The app has separate **AI Chat** and **Web Search** modes.
+The ZIP does not contain your private `.env` values. Add the same working values from your existing deployment; do not replace them with the example placeholders. The Excel endpoint remains marked Coming Soon in the original backend and has intentionally not been changed.
