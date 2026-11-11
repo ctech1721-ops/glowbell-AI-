@@ -3062,3 +3062,25 @@ html, body, #root { background:#020306; }
   display: none !important;
   width: 0 !important;
 }
+
+/* Hide main application scrollbars without disabling scrolling */
+html,
+body,
+#root,
+.global-app,
+.gb-workspace,
+.gb-main {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar,
+.global-app::-webkit-scrollbar,
+.gb-workspace::-webkit-scrollbar,
+.gb-main::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
