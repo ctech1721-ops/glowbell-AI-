@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import { createRequire } from "node:module";
@@ -8,14 +8,27 @@ import crypto from "node:crypto";
 import JSZip from "jszip";
 import { pathToFileURL } from "node:url";
 
+dotenv.config({ override: true });
+
 const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+console.log("OWNER SECRET CHECK:", {
+  loaded: Boolean(process.env.OWNER_SESSION_SECRET),
+  length: process.env.OWNER_SESSION_SECRET?.length || 0
+});
 
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
+
+console.log(
+  "OWNER SECRET CHECK:",
+  Boolean(process.env.OWNER_SESSION_SECRET),
+  "Length:",
+  process.env.OWNER_SESSION_SECRET?.length || 0
+);
 
 // --------------------------------------------------
 // ENVIRONMENT AND SUPABASE
@@ -1640,12 +1653,18 @@ app.post("/api/usage/heartbeat", async (req, res) => {
 
 app.get("/api/owner/usage", async (req, res) => {
   if (!verifyOwnerRequest(req)) {
-    return res.status(401).json({ error: "Unauthorized owner access." });
+    return res.status(401).json({
+      error: "Unauthorized owner access.",
+    });
   }
 
   try {
-    const [{ data: usersData, error: usersError }, { data: rows, error: usageError }] = await Promise.all([
-      supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+    const [usersResult, usageResult] = await Promise.all([
+      supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      }),
+
       supabaseAdmin
         .from("user_usage_daily")
         .select("user_id, usage_date, seconds, last_seen")
@@ -1653,21 +1672,52 @@ app.get("/api/owner/usage", async (req, res) => {
         .limit(50000),
     ]);
 
-    if (usersError) throw usersError;
+    const { data: usersData, error: usersError } = usersResult;
+    const { data: rows, error: usageError } = usageResult;
+
+    // Log the exact Supabase errors without exposing API keys.
+    if (usersError) {
+      console.error("SUPABASE USERS ERROR:", {
+        message: usersError.message,
+        status: usersError.status,
+        code: usersError.code,
+        details: usersError.details,
+      });
+
+      return res.status(500).json({
+        error: "Could not load registered users.",
+      });
+    }
+
     if (usageError) {
-      const missing = /does not exist|schema cache|Could not find/i.test(usageError.message || "");
+      console.error("SUPABASE USAGE ERROR:", {
+        message: usageError.message,
+        code: usageError.code,
+        details: usageError.details,
+        hint: usageError.hint,
+      });
+
+      const missing =
+        /does not exist|schema cache|Could not find/i.test(
+          usageError.message || ""
+        );
+
       return res.status(missing ? 200 : 500).json({
         setupNeeded: missing,
         today: usageDateString(),
         timezone: USAGE_TIMEZONE,
         users: [],
-        error: missing ? "Run supabase/usage_setup.sql in the Supabase SQL Editor first." : "Could not load usage.",
+        error: missing
+          ? "Run supabase/usage_setup.sql in the Supabase SQL Editor first."
+          : "Could not load usage.",
       });
     }
 
     const lastSeenByUser = new Map();
+
     for (const row of rows || []) {
       const previous = lastSeenByUser.get(row.user_id);
+
       if (!previous || row.last_seen > previous) {
         lastSeenByUser.set(row.user_id, row.last_seen);
       }
@@ -1676,7 +1726,10 @@ app.get("/api/owner/usage", async (req, res) => {
     const users = (usersData?.users || []).map((user) => ({
       id: user.id,
       email: user.email || "",
-      name: user.user_metadata?.full_name || user.user_metadata?.name || "",
+      name:
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        "",
       createdAt: user.created_at,
       lastSignInAt: user.last_sign_in_at || null,
       lastSeenAt: lastSeenByUser.get(user.id) || null,
@@ -1689,8 +1742,15 @@ app.get("/api/owner/usage", async (req, res) => {
       users,
     });
   } catch (error) {
-    console.error("Owner usage API error:", error);
-    return res.status(500).json({ error: "Could not load usage." });
+    console.error("OWNER USAGE ROUTE ERROR:", {
+      message: error?.message,
+      code: error?.code,
+      status: error?.status,
+    });
+
+    return res.status(500).json({
+      error: "Could not load usage.",
+    });
   }
 });
 
