@@ -831,3 +831,15 @@ body { overscroll-behavior: none; }
 .gx-sms-media img, .gx-sms-media video { width: auto; height: auto; max-width: 100%; max-height: 260px; margin: 0 auto; object-fit: contain; background: #050a14; border-radius: 12px; }
 .gx-sms-media.is-grid img, .gx-sms-media.is-grid video { width: 100%; height: 100%; max-height: none; object-fit: contain; }
 .gx-sms-lightbox img, .gx-sms-lightbox video { width: auto; height: auto; max-width: 92vw; max-height: 82vh; object-fit: contain; }
+
+/* SMS Friend — requests page (opens on the right) */
+.gx-sms-reqpage { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.gx-sms-reqbody { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 10px; padding: 14px 16px; }
+.gx-sms-reqbody .gx-sms-notice { margin: 0; }
+.gx-sms-reqcard { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px 12px; align-items: center; padding: 12px; background: #07101f; border: 1px solid var(--g-line); border-radius: 14px; }
+.gx-sms-reqcard .gx-sms-av { width: 44px; height: 44px; }
+.gx-sms-reqcard .gx-sms-req-actions { grid-column: 1 / -1; }
+.gx-sms-reqcard .gx-sms-req-actions button { min-height: 38px; font-size: 13.5px; }
+.gx-sms-sent { display: grid; gap: 4px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--g-line); }
+.gx-sms-sent h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; font-size: 13px; color: var(--g-muted); }
+.gx-sms-sent p { margin: 0; font-size: 13.5px; color: #cfdcf5; }

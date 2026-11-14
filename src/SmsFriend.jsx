@@ -278,7 +278,7 @@ export default function SmsFriend({ user, onClose, sms }) {
     if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
     await Promise.all([loadFriends(), loadRequests()]);
     sms.refresh();
-    if (action === "accept") { setActiveId(req.requester_id); setView("chat"); setTab("chat"); }
+    if (action === "accept") { setShowReqs(false); setActiveId(req.requester_id); setView("chat"); setTab("chat"); }
   }
 
   async function blockActive() {
@@ -428,42 +428,10 @@ export default function SmsFriend({ user, onClose, sms }) {
           {notice && !active && <p className="gx-sms-notice" role="alert">{notice}</p>}
 
           {!setupNeeded && (
-            <button type="button" className={`gx-sms-reqbtn${showReqs ? " is-on" : ""}`} onClick={() => setShowReqs((v) => !v)}>
+            <button type="button" className={`gx-sms-reqbtn${showReqs ? " is-on" : ""}`} onClick={() => { setShowReqs(true); setView("chat"); setNotice(""); loadRequests(); }}>
               <Inbox size={16} /> Requests
               {incomingReqs.length > 0 && <b className="gx-sms-badge">{incomingReqs.length}</b>}
             </button>
-          )}
-
-          {!setupNeeded && showReqs && (
-            <section className="gx-sms-reqs" aria-label="Friend requests">
-              {reqSetupNeeded && (
-                <div className="gx-sms-empty is-setup">
-                  <strong>One-time setup needed for requests</strong>
-                  <p>Open Supabase → SQL Editor → New query, paste everything from <code>supabase/sms_run_this_once.sql</code>, press Run, then reload this page.</p>
-                </div>
-              )}
-              {!reqSetupNeeded && incomingReqs.length === 0 && <p className="gx-sms-reqempty">No new requests.</p>}
-              {incomingReqs.map((r) => (
-                <div key={r.id} className="gx-sms-req">
-                  <span className="gx-sms-av">{initials(r.requester_name, r.requester_email)}</span>
-                  <span className="gx-sms-who"><strong>{r.requester_name || r.requester_email.split("@")[0]}</strong><small>{r.requester_email}</small></span>
-                  <div className="gx-sms-req-actions">
-                    <button type="button" className="is-accept" disabled={busyReq === r.id} onClick={() => answerRequest(r, "accept")}><Check size={14} /> Accept</button>
-                    <button type="button" className="is-reject" disabled={busyReq === r.id} onClick={() => answerRequest(r, "reject")}><X size={14} /> Reject</button>
-                    <button type="button" className="is-block" disabled={busyReq === r.id} onClick={() => answerRequest(r, "block")} title="Block this user"><Ban size={14} /> Block</button>
-                  </div>
-                </div>
-              ))}
-            </section>
-          )}
-
-          {!setupNeeded && showReqs && !reqSetupNeeded && sentReqs.length > 0 && (
-            <section className="gx-sms-reqs is-sent" aria-label="Sent requests">
-              <h4><Clock size={13} /> Waiting for approval</h4>
-              {sentReqs.map((r) => (
-                <p key={r.id}>{r.receiver_name || r.receiver_email}</p>
-              ))}
-            </section>
           )}
 
           <div className="gx-sms-friends">
@@ -479,7 +447,7 @@ export default function SmsFriend({ user, onClose, sms }) {
             ) : visibleFriends.map((f) => (
               <button type="button" key={f.friend_id}
                 className={`gx-sms-friend${f.friend_id === activeId ? " is-active" : ""}`}
-                onClick={() => { setActiveId(f.friend_id); setView("chat"); setTab("chat"); setNotice(""); }}>
+                onClick={() => { setShowReqs(false); setActiveId(f.friend_id); setView("chat"); setTab("chat"); setNotice(""); }}>
                 <span className="gx-sms-av">{initials(f.friend_name, f.friend_email)}</span>
                 <span className="gx-sms-who"><strong>{f.friend_name || f.friend_email.split("@")[0]}</strong><small>{f.friend_email}</small></span>
                 {sms.counts[f.friend_id] > 0 && <b className="gx-sms-badge">{sms.counts[f.friend_id]}</b>}
@@ -502,7 +470,46 @@ export default function SmsFriend({ user, onClose, sms }) {
 
         {/* ---------- conversation ---------- */}
         <section className="gx-sms-chat">
-          {!active ? (
+          {showReqs ? (
+            <div className="gx-sms-reqpage">
+              <header className="gx-sms-head">
+                <button type="button" className="gx-sms-back" onClick={() => { setShowReqs(false); setView("list"); }} aria-label="Back"><ArrowLeft size={20} /></button>
+                <span className="gx-sms-av"><Inbox size={19} /></span>
+                <div className="gx-sms-who"><strong>Friend requests</strong><small>{incomingReqs.length ? `${incomingReqs.length} waiting for you` : "Nothing new"}</small></div>
+                <button type="button" className="gx-sms-close" onClick={() => setShowReqs(false)} aria-label="Close requests"><X size={20} /></button>
+              </header>
+              <div className="gx-sms-reqbody">
+                {notice && <p className="gx-sms-notice" role="alert">{notice}</p>}
+                {reqSetupNeeded ? (
+                  <div className="gx-sms-empty is-setup">
+                    <strong>One-time setup needed for requests</strong>
+                    <p>Open Supabase → SQL Editor → New query, paste everything from <code>supabase/sms_run_this_once.sql</code>, press Run, then reload this page.</p>
+                  </div>
+                ) : (
+                  <>
+                    {incomingReqs.length === 0 && <div className="gx-sms-empty"><Inbox size={28} /><p>No friend requests right now.</p></div>}
+                    {incomingReqs.map((r) => (
+                      <div key={r.id} className="gx-sms-reqcard">
+                        <span className="gx-sms-av">{initials(r.requester_name, r.requester_email)}</span>
+                        <span className="gx-sms-who"><strong>{r.requester_name || r.requester_email.split("@")[0]}</strong><small>{r.requester_email}</small></span>
+                        <div className="gx-sms-req-actions">
+                          <button type="button" className="is-accept" disabled={busyReq === r.id} onClick={() => answerRequest(r, "accept")}><Check size={15} /> Accept</button>
+                          <button type="button" className="is-reject" disabled={busyReq === r.id} onClick={() => answerRequest(r, "reject")}><X size={15} /> Reject</button>
+                          <button type="button" className="is-block" disabled={busyReq === r.id} onClick={() => answerRequest(r, "block")} title="Block this user"><Ban size={15} /> Block</button>
+                        </div>
+                      </div>
+                    ))}
+                    {sentReqs.length > 0 && (
+                      <div className="gx-sms-sent">
+                        <h4><Clock size={13} /> Requests you sent (waiting)</h4>
+                        {sentReqs.map((r) => <p key={r.id}>{r.receiver_name || r.receiver_email}</p>)}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ) : !active ? (
             <div className="gx-sms-placeholder">
               <MessageCircle size={46} />
               <h3>Chat with your friends</h3>
