@@ -39,7 +39,7 @@ Start-circle intro with solid-blue animated G, dark welcome guide, daily date + 
 
 ## SMS Friend (one-time Supabase setup)
 Open Supabase → SQL Editor → paste all of `supabase/sms_setup.sql` → Run. Then reload the app.
-Then run `supabase/sms_requests_setup.sql` the same way (friend requests + block).
+Then run `supabase/sms_run_this_once.sql` the same way (friend requests + block + file sending).
 To add someone, enter the email they signed up with: they get a request in their SMS Friend window and can Accept, Reject or Block. Chat opens only after Accept. The sidebar badge counts unread messages + pending requests; each friend shows their own unread count. Photos/videos go to a private `sms-media` bucket (max 10 MB photo / 50 MB video). SMS chats never go to the AI.
 
 ## Owner usage tracking
