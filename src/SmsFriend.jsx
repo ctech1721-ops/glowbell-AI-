@@ -161,9 +161,11 @@ export default function SmsFriend({ user, onClose, sms }) {
 
   const loadRequests = useCallback(async () => {
     const [inc, out, blk] = await Promise.all([
-      supabase.from("sms_requests").select("id, requester_id, requester_email, requester_name, created_at")
+      // Select all columns so an optional/misspelled display column cannot
+      // make the entire incoming-request query fail.
+      supabase.from("sms_requests").select("*")
         .eq("receiver_id", me).eq("status", "pending").order("created_at", { ascending: false }),
-      supabase.from("sms_requests").select("id, receiver_id, receiver_email, receiver_name, created_at")
+      supabase.from("sms_requests").select("*")
         .eq("requester_id", me).eq("status", "pending").order("created_at", { ascending: false }),
       supabase.from("sms_blocks").select("blocked_id, blocked_email, blocked_name").eq("blocker_id", me),
     ]);
@@ -173,8 +175,22 @@ export default function SmsFriend({ user, onClose, sms }) {
       return;
     }
     setReqSetupNeeded(false);
-    if (!inc.error) setIncomingReqs(inc.data || []);
-    if (!out.error) setSentReqs(out.data || []);
+    if (inc.error) {
+      console.error("SMS INCOMING REQUESTS LOAD ERROR:", inc.error);
+      setNotice(`Could not load incoming requests: ${inc.error.message}`);
+    } else {
+      setIncomingReqs((inc.data || []).map((r) => ({
+        ...r,
+        requester_email: r.requester_email || r.requuester_email || "",
+        requester_name: r.requester_name || r.requuester_name || "",
+      })));
+    }
+    if (out.error) console.error("SMS SENT REQUESTS LOAD ERROR:", out.error);
+    else setSentReqs((out.data || []).map((r) => ({
+      ...r,
+      receiver_email: r.receiver_email || r.requuester_email || "",
+      receiver_name: r.receiver_name || r.requuester_name || "",
+    })));
     if (!blk.error) setBlocked(blk.data || []);
   }, [me]);
 
