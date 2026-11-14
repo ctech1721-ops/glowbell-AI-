@@ -1,0 +1,66 @@
+/* ---------- Global AI logo (SVG) ---------- */
+.gl-logo { display: block; overflow: visible; shape-rendering: geometricPrecision; filter: drop-shadow(0 0 5px rgba(20,130,255,.55)); }
+
+/* Gentle floating glow (header / hero) */
+.gl-loop { animation: gl-float 5s ease-in-out infinite; }
+.gl-loop .gl-star { transform-box: fill-box; transform-origin: center; animation: gl-twinkle 2.6s ease-in-out infinite; }
+.gl-loop .gl-orbit-front { stroke-dasharray: 100; animation: gl-orbit-shimmer 4.5s ease-in-out infinite; }
+@keyframes gl-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes gl-twinkle { 0%,100% { opacity: 1; transform: translate(205px,50px) scale(1) rotate(0); } 50% { opacity: .7; transform: translate(205px,50px) scale(.72) rotate(45deg); } }
+@keyframes gl-orbit-shimmer { 0%,100% { opacity: 1; } 50% { opacity: .65; } }
+
+/* Intro: the G draws itself in solid blue, then the orbit and star appear */
+.gl-intro .gl-g-arc,
+.gl-intro .gl-g-bar,
+.gl-intro .gl-orbit { stroke-dasharray: 100; stroke-dashoffset: 100; }
+.gl-intro .gl-g-arc { animation: gl-draw 1.25s cubic-bezier(.45,.05,.25,1) .35s forwards; }
+.gl-intro .gl-g-bar { animation: gl-draw .5s ease-out 1.35s forwards; }
+.gl-intro .gl-orbit-back { animation: gl-draw 1s ease-out 1.55s forwards; }
+.gl-intro .gl-orbit-front { animation: gl-draw 1s ease-out 1.55s forwards; }
+.gl-intro .gl-letter { animation: gl-letter-glow 1.2s ease-out 1.4s both; }
+.gl-intro .gl-star { opacity: 0; animation: gl-star-pop .7s cubic-bezier(.2,1.4,.4,1) 2.3s forwards; }
+@keyframes gl-draw { to { stroke-dashoffset: 0; } }
+@keyframes gl-letter-glow { from { opacity: .9; } to { opacity: 1; } }
+@keyframes gl-star-pop {
+  0% { opacity: 0; transform: translate(205px,50px) scale(0) rotate(-90deg); }
+  100% { opacity: 1; transform: translate(205px,50px) scale(1) rotate(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gl-loop, .gl-loop .gl-star, .gl-loop .gl-orbit-front { animation: none; }
+  .gl-intro .gl-g-arc, .gl-intro .gl-g-bar, .gl-intro .gl-orbit { animation-duration: .01s; animation-delay: 0s; }
+  .gl-intro .gl-star { animation-duration: .01s; animation-delay: 0s; }
+}
+
+/* ---------- Start (intro) circle ---------- */
+.gx-intro {
+  position: fixed; inset: 0; z-index: 100600;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px;
+  color: #dff4ff; background: radial-gradient(ellipse at center, #0b2147 0%, #03060f 70%);
+  animation: gx-intro-out .5s ease 2.9s forwards;
+  cursor: pointer;
+}
+.gx-intro-circle {
+  position: relative; display: grid; place-items: center;
+  width: min(62vw, 260px); aspect-ratio: 1; border-radius: 50%;
+  box-shadow: 0 0 60px rgba(20, 130, 255, .22), inset 0 0 36px rgba(20, 130, 255, .14);
+  animation: gx-circle-in .7s cubic-bezier(.2,.8,.2,1) both, gx-circle-out .55s cubic-bezier(.6,0,.9,.4) 2.9s forwards;
+}
+.gx-intro-ring { overflow: visible; position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.gx-intro-ring circle { fill: none; stroke: #2aa4ff; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 302; stroke-dashoffset: 302; animation: gl-draw-ring 1.6s ease-out .1s forwards; filter: drop-shadow(0 0 5px #1b8cff); }
+.gx-intro-ring circle.gx-ring-faint { stroke: rgba(70,150,255,.25); stroke-dashoffset: 0; animation: none; filter: none; }
+@keyframes gl-draw-ring { to { stroke-dashoffset: 0; } }
+.gx-intro-logo { width: 62%; }
+.gx-intro-word {
+  font-size: 13px; font-weight: 800; letter-spacing: .5em; padding-left: .5em;
+  background: linear-gradient(90deg, #6fd8ff, #1a7bff); -webkit-background-clip: text; background-clip: text; color: transparent;
+  opacity: 0; animation: gx-fade-up .8s ease 1.6s forwards;
+}
+@keyframes gx-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes gx-circle-in { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes gx-circle-out { to { transform: scale(1.5); opacity: 0; } }
+@keyframes gx-intro-out { to { opacity: 0; visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .gx-intro { animation-delay: 1s; }
+  .gx-intro-circle { animation-delay: 0s, 1s; }
+}

@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import GlobalLogo from "./GlobalLogo";
 
 export default function Auth({ onLogin, onOwnerLogin }) {
   const [mode, setMode] = useState("signup");
@@ -114,153 +115,50 @@ export default function Auth({ onLogin, onOwnerLogin }) {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-        background: "#f8faff",
-        color: "#202033",
-      }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          width: "100%",
-          maxWidth: 420,
-          boxSizing: "border-box",
-          padding: 28,
-          borderRadius: 20,
-          background: "#fff",
-          boxShadow: "0 8px 40px #29204a18",
-        }}
-      >
-        <h1 style={{ marginTop: 0 }}>Global AI</h1>
-
-        <p>
-          {mode === "signup"
-            ? "Create your account"
-            : "Welcome back"}
+    <main className="gx-auth">
+      <form className="gx-auth-card" onSubmit={handleSubmit}>
+        <GlobalLogo size={96} animate="loop" className="gx-auth-logo" />
+        <h1>Global <b>AI</b></h1>
+        <p className="gx-auth-sub">
+          {mode === "signup" ? "Create your account" : "Welcome back"}
         </p>
 
         {mode === "signup" && (
           <>
             <label htmlFor="full-name">Full name</label>
-            <input
-              id="full-name"
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="name"
-              style={fieldStyle}
-              placeholder="Enter your full name"
-            />
+            <input id="full-name" type="text" required value={name}
+              onChange={(e) => setName(e.target.value)} autoComplete="name"
+              placeholder="Enter your full name" />
           </>
         )}
 
         <label htmlFor="email">Email address</label>
-        <input
-          id="email"
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-          style={fieldStyle}
-          placeholder="Enter your email"
-        />
+        <input id="email" type="email" required value={email}
+          onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+          placeholder="Enter your email" />
 
         <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          required
-          value={password}
+        <input id="password" type="password" required value={password}
           onChange={(e) => setPassword(e.target.value)}
-          autoComplete={
-            mode === "signup"
-              ? "new-password"
-              : "current-password"
-          }
-          style={fieldStyle}
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
           minLength={mode === "signup" ? 12 : 1}
-          placeholder={
-            mode === "signup"
-              ? "12+ characters, number and symbol"
-              : "Enter your password"
-          }
-        />
+          placeholder={mode === "signup" ? "12+ characters, number and symbol" : "Enter your password"} />
 
-        {error && (
-          <p role="alert" style={{ color: "#b42318" }}>
-            {error}
-          </p>
-        )}
+        {error && <p role="alert" className="gx-auth-error">{error}</p>}
+        {notice && <p role="status" className="gx-auth-notice">{notice}</p>}
 
-        {notice && (
-          <p role="status" style={{ color: "#067647" }}>
-            {notice}
-          </p>
-        )}
-
-        <button
-          disabled={loading}
-          type="submit"
-          style={{
-            width: "100%",
-            marginTop: 18,
-            padding: 13,
-            border: 0,
-            borderRadius: 10,
-            color: "white",
-            background: "#7c3aed",
-            cursor: loading ? "wait" : "pointer",
-            opacity: loading ? 0.7 : 1,
-          }}
-        >
-          {loading
-            ? "Please wait..."
-            : mode === "signup"
-            ? "Create account"
-            : "Log in"}
+        <button className="gx-auth-submit" disabled={loading} type="submit">
+          {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Log in"}
         </button>
 
-        <button
-          type="button"
+        <button className="gx-auth-switch" type="button"
           onClick={() => {
             setMode(mode === "signup" ? "login" : "signup");
-            setError("");
-            setNotice("");
-            setPassword("");
-          }}
-          style={{
-            marginTop: 14,
-            width: "100%",
-            padding: 10,
-            border: 0,
-            background: "transparent",
-            cursor: "pointer",
-          }}
-        >
-          {mode === "signup"
-            ? "Already have an account? Log in"
-            : "New to Global AI? Create account"}
+            setError(""); setNotice(""); setPassword("");
+          }}>
+          {mode === "signup" ? "Already have an account? Log in" : "New to Global AI? Create account"}
         </button>
       </form>
     </main>
   );
 }
-
-const fieldStyle = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  margin: "6px 0 16px",
-  padding: 12,
-  border: "1px solid #d8d8e2",
-  borderRadius: 9,
-  background: "#fff",
-  color: "#202033",
-};

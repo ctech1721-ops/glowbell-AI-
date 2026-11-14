@@ -33,3 +33,13 @@ The existing Express app is exported for the supplied Vercel API catch-all at `a
 ## Important
 
 The ZIP does not contain your private `.env` values. Add the same working values from your existing deployment; do not replace them with the example placeholders. The Excel endpoint remains marked Coming Soon in the original backend and has intentionally not been changed.
+
+## UI update
+Start-circle intro with solid-blue animated G, dark welcome guide, daily date + calendar (header chip, welcome card, day dividers), flat chat messages, responsive phone/tablet/desktop layout, and ChatGPT-style features: stop generating, typing effect, edit & resend, voice input, read aloud, like/dislike, chat search/rename/pin, temporary chat, export to Markdown, drag-drop/paste files, slash commands, personalisation (response style + custom instructions), keyboard shortcuts (Ctrl K / B / ,).
+
+## SMS Friend (one-time Supabase setup)
+Open Supabase → SQL Editor → paste all of `supabase/sms_setup.sql` → Run. Then reload the app.
+Friends are added by the email they signed up with. Photos/videos go to a private `sms-media` bucket (max 10 MB photo / 50 MB video). SMS chats never go to the AI.
+
+## Owner usage tracking
+Run `supabase/usage_setup.sql` once in the Supabase SQL Editor. Every logged-in user's active time (visible tab, not idle) is recorded per day; the Owner Dashboard shows it per user per date and refreshes every minute. Timezone: `USAGE_TIMEZONE` env var (default Asia/Kolkata).

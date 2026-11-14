@@ -138,8 +138,23 @@ export default function NotesWidget({ userId }) {
 
     window.addEventListener("global-open-notes", handleOpenNotes);
 
+    const handleAddNote = (event) => {
+      const note = {
+        ...makeNote(),
+        title: String(event.detail?.title || "").slice(0, 80),
+        content: String(event.detail?.content || ""),
+      };
+      setNotes((previous) => [note, ...previous]);
+      setActiveId(note.id);
+      setIsOpen(true);
+      setMenuOpen(false);
+      setSaved(false);
+    };
+    window.addEventListener("global-add-note", handleAddNote);
+
     return () => {
       window.removeEventListener("global-open-notes", handleOpenNotes);
+      window.removeEventListener("global-add-note", handleAddNote);
     };
   }, [activeId, notes]);
 
