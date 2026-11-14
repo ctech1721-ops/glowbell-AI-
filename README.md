@@ -39,7 +39,8 @@ Start-circle intro with solid-blue animated G, dark welcome guide, daily date + 
 
 ## SMS Friend (one-time Supabase setup)
 Open Supabase → SQL Editor → paste all of `supabase/sms_setup.sql` → Run. Then reload the app.
-Friends are added by the email they signed up with. Photos/videos go to a private `sms-media` bucket (max 10 MB photo / 50 MB video). SMS chats never go to the AI.
+Then run `supabase/sms_requests_setup.sql` the same way (friend requests + block).
+To add someone, enter the email they signed up with: they get a request in their SMS Friend window and can Accept, Reject or Block. Chat opens only after Accept. The sidebar badge counts unread messages + pending requests; each friend shows their own unread count. Photos/videos go to a private `sms-media` bucket (max 10 MB photo / 50 MB video). SMS chats never go to the AI.
 
 ## Owner usage tracking
 Run `supabase/usage_setup.sql` once in the Supabase SQL Editor. Every logged-in user's active time (visible tab, not idle) is recorded per day; the Owner Dashboard shows it per user per date and refreshes every minute. Timezone: `USAGE_TIMEZONE` env var (default Asia/Kolkata).

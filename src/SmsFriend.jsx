@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Search, UserPlus, Send, Paperclip, Image as ImageIcon, Film, ArrowLeft,
-  Trash2, MessageCircle, Play, Download, Users, Loader2,
+  Trash2, MessageCircle, Play, Download, Users, Loader2, Check, Ban, Clock, ShieldOff,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -37,6 +37,7 @@ const dayOf = (iso) => {
 export function useSmsUnread(userId) {
   const [incoming, setIncoming] = useState([]);
   const [reads, setReads] = useState({});
+  const [requestCount, setRequestCount] = useState(0);
 
   useEffect(() => {
     if (!userId) return;
@@ -49,6 +50,9 @@ export function useSmsUnread(userId) {
       .from("sms_messages").select("sender_id, created_at")
       .eq("receiver_id", userId).order("created_at", { ascending: false }).limit(300);
     if (!error && data) setIncoming(data);
+    const req = await supabase.from("sms_requests").select("id", { count: "exact", head: true })
+      .eq("receiver_id", userId).eq("status", "pending");
+    if (!req.error) setRequestCount(req.count || 0);
   }, [userId]);
 
   useEffect(() => {
@@ -59,6 +63,7 @@ export function useSmsUnread(userId) {
     try {
       channel = supabase.channel(`sms-unread-${userId}`)
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "sms_messages", filter: `receiver_id=eq.${userId}` }, refresh)
+        .on("postgres_changes", { event: "*", schema: "public", table: "sms_requests", filter: `receiver_id=eq.${userId}` }, refresh)
         .subscribe();
     } catch { /* realtime unavailable — polling still works */ }
     return () => {
@@ -75,7 +80,9 @@ export function useSmsUnread(userId) {
     return out;
   }, [incoming, reads]);
 
-  const total = useMemo(() => Object.values(counts).reduce((a, b) => a + b, 0), [counts]);
+  const messageTotal = useMemo(() => Object.values(counts).reduce((a, b) => a + b, 0), [counts]);
+  // sidebar badge = unread messages + friend requests waiting for an answer
+  const total = messageTotal + requestCount;
 
   const markRead = useCallback((friendId) => {
     setReads((prev) => {
@@ -85,12 +92,17 @@ export function useSmsUnread(userId) {
     });
   }, [userId]);
 
-  return { counts, total, markRead, refresh };
+  return { counts, total, requestCount, markRead, refresh };
 }
 
 export default function SmsFriend({ user, onClose, sms }) {
   const me = user.id;
   const [friends, setFriends] = useState([]);
+  const [incomingReqs, setIncomingReqs] = useState([]);
+  const [sentReqs, setSentReqs] = useState([]);
+  const [blocked, setBlocked] = useState([]);
+  const [showBlocked, setShowBlocked] = useState(false);
+  const [busyReq, setBusyReq] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [urls, setUrls] = useState({});
@@ -119,7 +131,10 @@ export default function SmsFriend({ user, onClose, sms }) {
       id: me,
       email: (user.email || "").toLowerCase(),
       name: user.user_metadata?.full_name || user.user_metadata?.name || "",
-    }, { onConflict: "id" }).then(({ error }) => { if (isMissingTable(error)) setSetupNeeded(true); });
+    }, { onConflict: "id" }).then(({ error }) => {
+  if (error) console.error("SMS PROFILES ERROR:", error);
+  if (isMissingTable(error)) setSetupNeeded(true);
+});
   }, [me, user]);
 
   const loadFriends = useCallback(async () => {
@@ -128,14 +143,48 @@ export default function SmsFriend({ user, onClose, sms }) {
       .eq("user_id", me).order("created_at", { ascending: false });
     setLoadingFriends(false);
     if (error) {
-      if (isMissingTable(error)) setSetupNeeded(true);
+      if (isMissingTable(error)) {
+  console.error("SMS FRIENDS ERROR:", error);
+  setSetupNeeded(true);
+}
       else setNotice(error.message);
       return;
     }
     setFriends(data || []);
   }, [me]);
 
-  useEffect(() => { loadFriends(); }, [loadFriends]);
+  const loadRequests = useCallback(async () => {
+    const [inc, out, blk] = await Promise.all([
+      supabase.from("sms_requests").select("id, requester_id, requester_email, requester_name, created_at")
+        .eq("receiver_id", me).eq("status", "pending").order("created_at", { ascending: false }),
+      supabase.from("sms_requests").select("id, receiver_id, receiver_email, receiver_name, created_at")
+        .eq("requester_id", me).eq("status", "pending").order("created_at", { ascending: false }),
+      supabase.from("sms_blocks").select("blocked_id, blocked_email, blocked_name").eq("blocker_id", me),
+    ]);
+    if (isMissingTable(inc.error) || isMissingTable(blk.error)) {
+  console.error("SMS REQUESTS ERROR:", inc.error);
+  console.error("SMS BLOCKS ERROR:", blk.error);
+  setSetupNeeded(true);
+  return;
+}
+    if (!inc.error) setIncomingReqs(inc.data || []);
+    if (!out.error) setSentReqs(out.data || []);
+    if (!blk.error) setBlocked(blk.data || []);
+  }, [me]);
+
+  useEffect(() => { loadFriends(); loadRequests(); }, [loadFriends, loadRequests]);
+
+  // keep requests / new friends fresh while the window is open
+  useEffect(() => {
+    const timer = window.setInterval(() => { loadFriends(); loadRequests(); }, 6000);
+    let channel;
+    try {
+      channel = supabase.channel(`sms-requests-${me}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "sms_requests" }, () => { loadFriends(); loadRequests(); })
+        .subscribe();
+    } catch { /* polling covers it */ }
+    return () => { window.clearInterval(timer); if (channel) supabase.removeChannel(channel); };
+  }, [me, loadFriends, loadRequests]);
 
   const signMedia = useCallback(async (list) => {
     const paths = list.filter((m) => m.media_path).map((m) => m.media_path);
@@ -197,7 +246,7 @@ export default function SmsFriend({ user, onClose, sms }) {
     const email = addEmail.trim().toLowerCase();
     if (!email || adding) return;
     setAdding(true); setNotice("");
-    const { data, error } = await supabase.rpc("sms_add_friend", { p_email: email });
+    const { data, error } = await supabase.rpc("sms_send_request", { p_email: email });
     setAdding(false);
     if (error) {
       if (isMissingTable(error)) setSetupNeeded(true);
@@ -205,9 +254,40 @@ export default function SmsFriend({ user, onClose, sms }) {
       return;
     }
     setAddEmail("");
-    await loadFriends();
     const row = Array.isArray(data) ? data[0] : data;
-    if (row?.out_id) { setActiveId(row.out_id); setView("chat"); setTab("chat"); }
+    await Promise.all([loadFriends(), loadRequests()]);
+    sms.refresh();
+    if (row?.out_status === "sent") {
+      setNotice(`Request sent to ${row.out_name || row.out_email}. You can chat once they accept.`);
+    } else if (row?.out_id) {
+      setActiveId(row.out_id); setView("chat"); setTab("chat");
+    }
+  }
+
+  async function answerRequest(req, action) {
+    if (action === "block" && !window.confirm(`Block ${req.requester_name || req.requester_email}? They will not be able to send you requests or messages.`)) return;
+    setBusyReq(req.id); setNotice("");
+    const { error } = await supabase.rpc("sms_respond_request", { p_request: req.id, p_action: action });
+    setBusyReq("");
+    if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
+    await Promise.all([loadFriends(), loadRequests()]);
+    sms.refresh();
+    if (action === "accept") { setActiveId(req.requester_id); setView("chat"); setTab("chat"); }
+  }
+
+  async function blockActive() {
+    if (!active) return;
+    if (!window.confirm(`Block ${active.friend_name || active.friend_email}? They will be removed from your friends and cannot message you.`)) return;
+    const { error } = await supabase.rpc("sms_block_user", { p_user: active.friend_id });
+    if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
+    setActiveId(null); setView("list");
+    await Promise.all([loadFriends(), loadRequests()]);
+  }
+
+  async function unblock(b) {
+    const { error } = await supabase.rpc("sms_unblock_user", { p_user: b.blocked_id });
+    if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
+    loadRequests();
   }
 
   function pickFiles(e) {
@@ -273,7 +353,8 @@ export default function SmsFriend({ user, onClose, sms }) {
   }
 
   const visibleFriends = friends.filter((f) =>
-    `${f.friend_name || ""} ${f.friend_email}`.toLowerCase().includes(filter.trim().toLowerCase()));
+    `${f.friend_name || ""} ${f.friend_email}`.toLowerCase().includes(filter.trim().toLowerCase()))
+    .sort((a, b) => (sms.counts[b.friend_id] || 0) - (sms.counts[a.friend_id] || 0));
   const photos = messages.filter((m) => m.media_type === "image");
   const videos = messages.filter((m) => m.media_type === "video");
 
@@ -306,8 +387,8 @@ export default function SmsFriend({ user, onClose, sms }) {
 
           <form className="gx-sms-add" onSubmit={addFriend}>
             <input type="email" value={addEmail} onChange={(e) => setAddEmail(e.target.value)}
-              placeholder="Friend's email" aria-label="Friend's email" />
-            <button type="submit" disabled={adding || !addEmail.trim()} title="Add friend" aria-label="Add friend">
+              placeholder="Enter email to send request" aria-label="Friend's email" />
+            <button type="submit" disabled={adding || !addEmail.trim()} title="Send friend request" aria-label="Send friend request">
               {adding ? <Loader2 size={18} className="gx-spin" /> : <UserPlus size={18} />}
             </button>
           </form>
@@ -318,6 +399,32 @@ export default function SmsFriend({ user, onClose, sms }) {
 
           {notice && !active && <p className="gx-sms-notice" role="alert">{notice}</p>}
 
+          {!setupNeeded && incomingReqs.length > 0 && (
+            <section className="gx-sms-reqs" aria-label="Friend requests">
+              <h4>Friend requests <b className="gx-sms-badge">{incomingReqs.length}</b></h4>
+              {incomingReqs.map((r) => (
+                <div key={r.id} className="gx-sms-req">
+                  <span className="gx-sms-av">{initials(r.requester_name, r.requester_email)}</span>
+                  <span className="gx-sms-who"><strong>{r.requester_name || r.requester_email.split("@")[0]}</strong><small>{r.requester_email}</small></span>
+                  <div className="gx-sms-req-actions">
+                    <button type="button" className="is-accept" disabled={busyReq === r.id} onClick={() => answerRequest(r, "accept")}><Check size={14} /> Accept</button>
+                    <button type="button" className="is-reject" disabled={busyReq === r.id} onClick={() => answerRequest(r, "reject")}><X size={14} /> Reject</button>
+                    <button type="button" className="is-block" disabled={busyReq === r.id} onClick={() => answerRequest(r, "block")} title="Block this user"><Ban size={14} /> Block</button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {!setupNeeded && sentReqs.length > 0 && (
+            <section className="gx-sms-reqs is-sent" aria-label="Sent requests">
+              <h4><Clock size={13} /> Waiting for approval</h4>
+              {sentReqs.map((r) => (
+                <p key={r.id}>{r.receiver_name || r.receiver_email}</p>
+              ))}
+            </section>
+          )}
+
           <div className="gx-sms-friends">
             {setupNeeded ? (
               <div className="gx-sms-empty is-setup">
@@ -327,7 +434,7 @@ export default function SmsFriend({ user, onClose, sms }) {
             ) : loadingFriends ? (
               <div className="gx-sms-empty"><Loader2 className="gx-spin" /></div>
             ) : visibleFriends.length === 0 ? (
-              <div className="gx-sms-empty"><Users size={26} /><p>{friends.length ? "No friends match." : "No friends yet. Enter your friend's email above to add them."}</p></div>
+              <div className="gx-sms-empty"><Users size={26} /><p>{friends.length ? "No friends match." : "No friends yet. Enter an email above to send a friend request."}</p></div>
             ) : visibleFriends.map((f) => (
               <button type="button" key={f.friend_id}
                 className={`gx-sms-friend${f.friend_id === activeId ? " is-active" : ""}`}
@@ -338,6 +445,18 @@ export default function SmsFriend({ user, onClose, sms }) {
               </button>
             ))}
           </div>
+
+          {!setupNeeded && blocked.length > 0 && (
+            <div className="gx-sms-blocked">
+              <button type="button" onClick={() => setShowBlocked((v) => !v)}><ShieldOff size={14} /> Blocked users ({blocked.length})</button>
+              {showBlocked && blocked.map((b) => (
+                <div key={b.blocked_id} className="gx-sms-blocked-row">
+                  <span>{b.blocked_name || b.blocked_email}</span>
+                  <button type="button" onClick={() => unblock(b)}>Unblock</button>
+                </div>
+              ))}
+            </div>
+          )}
         </aside>
 
         {/* ---------- conversation ---------- */}
@@ -346,7 +465,7 @@ export default function SmsFriend({ user, onClose, sms }) {
             <div className="gx-sms-placeholder">
               <MessageCircle size={46} />
               <h3>Chat with your friends</h3>
-              <p>Add a friend by email, then send messages, photos and videos. Your chats are private and never shared with the AI.</p>
+              <p>Send a friend request by email. Once they accept, send messages, photos and videos. Your chats are private and never shared with the AI.</p>
               <button type="button" className="gx-sms-back-list" onClick={() => setView("list")}>Choose a friend</button>
             </div>
           ) : (
@@ -355,6 +474,7 @@ export default function SmsFriend({ user, onClose, sms }) {
                 <button type="button" className="gx-sms-back" onClick={() => setView("list")} aria-label="Back to friends"><ArrowLeft size={20} /></button>
                 <span className="gx-sms-av">{initials(active.friend_name, active.friend_email)}</span>
                 <div className="gx-sms-who"><strong>{active.friend_name || active.friend_email.split("@")[0]}</strong><small>{active.friend_email}</small></div>
+                <button type="button" className="gx-sms-block" onClick={blockActive} title="Block this user" aria-label="Block this user"><Ban size={18} /></button>
                 <button type="button" className="gx-sms-close" onClick={onClose} aria-label="Close"><X size={20} /></button>
               </header>
 

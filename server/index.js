@@ -1332,7 +1332,6 @@ function buildPreferencesPrompt(preferences) {
   return lines.length ? `\n\nUser preferences:\n${lines.join("\n")}` : "";
 }
 
-
 async function askGroq({
   preferences,
   message,
@@ -1389,9 +1388,7 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
     ...history,
     {
       role: "user",
-      content: imageDataUrl
-        ? userContent
-        : userContent[0].text,
+      content: userContent,
     },
   ];
 
@@ -1402,18 +1399,12 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: imageDataUrl
-        ? "qwen/qwen3.8-27b"
-        : MODEL,
+      model: MODEL,
       messages,
       temperature: 0.4,
-      ...(imageDataUrl
-        ? { max_completion_tokens: 4096 }
-        : {
-            max_tokens: 4096,
-            reasoning_effort: "medium",
-            reasoning_format: "hidden",
-          }),
+      max_tokens: 4096,
+      reasoning_effort: "medium",
+      reasoning_format: "hidden",
     }),
     signal: AbortSignal.timeout(60000),
   });
@@ -1421,22 +1412,13 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
   if (!response.ok) {
     const details = await response.text();
     console.error("Groq error:", response.status, details);
-
     if (response.status === 401) {
-      throw new Error(
-        "Groq authentication failed. Check the GROQ_API_KEY in your environment."
-      );
+      throw new Error("Groq authentication failed. Check the GROQ_API_KEY in your environment.");
     }
-
     if (response.status === 429) {
-      throw new Error(
-        "Groq rate limit reached. Please wait a moment and try again."
-      );
+      throw new Error("Groq rate limit reached. Please wait a moment and try again.");
     }
-
-    throw new Error(
-      `AI service returned status ${response.status}: ${details.slice(0, 500)}`
-    );
+    throw new Error(`AI service returned status ${response.status}: ${details.slice(0, 500)}`);
   }
 
   const data = await response.json();
@@ -1448,7 +1430,6 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
 
   return answer.trim();
 }
-
 
 // --------------------------------------------------
 // OWNER LOGIN
