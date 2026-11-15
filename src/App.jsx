@@ -1796,7 +1796,7 @@ export default function App() {
                         {!isUser && index === lastAssistantIndex && index === lastIndex && !loading && !isTyping &&
                           message.ts && !notesAsked[message.ts] && removeAnswerSources(message.content).length > 60 && (
                           <div className="gx-notes-ask" role="group" aria-label="Short notes">
-                            <span><NotebookPen size={18} /> Simple short notes eduka venuma?</span>
+                            <span><NotebookPen size={18} /> Would you like simple, short notes?</span>
                             <button type="button" disabled={notesBusy} onClick={() => makeShortNotes(index)}>
                               {notesBusy ? "Making notes…" : "Yes, open notes"}
                             </button>
