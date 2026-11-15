@@ -1399,12 +1399,17 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: MODEL,
+      // GPT-OSS 120B is text-only. Use Groq's current vision-capable
+      // Qwen model whenever an image is attached, while keeping the existing
+      // text model and settings for ordinary chat requests.
+      model: imageDataUrl ? "qwen/qwen3.8-27b" : MODEL,
       messages,
       temperature: 0.4,
       max_tokens: 4096,
-      reasoning_effort: "medium",
-      reasoning_format: "hidden",
+      ...(imageDataUrl ? {} : {
+        reasoning_effort: "medium",
+        reasoning_format: "hidden",
+      }),
     }),
     signal: AbortSignal.timeout(60000),
   });
