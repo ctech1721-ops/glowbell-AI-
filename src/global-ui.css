@@ -843,3 +843,36 @@ body { overscroll-behavior: none; }
 .gx-sms-sent { display: grid; gap: 4px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--g-line); }
 .gx-sms-sent h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; font-size: 13px; color: var(--g-muted); }
 .gx-sms-sent p { margin: 0; font-size: 13.5px; color: #cfdcf5; }
+
+/* ---- Multi-file attachments (up to 3) ---- */
+.gx-attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; }
+.gx-thumb { position: relative; width: 76px; height: 76px; flex: 0 0 auto; }
+.gx-thumb-open { display: block; width: 100%; height: 100%; padding: 0; border: 1px solid rgba(120,160,255,.35); border-radius: 12px; overflow: hidden; background: #0b1424; cursor: pointer; }
+.gx-thumb-open img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .15s ease; }
+.gx-thumb-open:hover img { transform: scale(1.06); }
+.gx-thumb-file { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 100%; height: 100%; padding: 6px; border: 1px solid rgba(120,160,255,.35); border-radius: 12px; background: #0b1424; color: #cfe0ff; font-size: 10px; text-align: center; overflow: hidden; }
+.gx-thumb-file span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Remove (X) button: bottom-right corner of the image */
+.gx-thumb-remove { position: absolute; right: 4px; bottom: 4px; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.72); color: #fff; cursor: pointer; box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
+.gx-thumb-remove:hover { background: #e5484d; }
+.gx-thumb.is-context { opacity: .85; }
+.gx-attach-count { opacity: .65; font-size: 12px; }
+.gx-attach-clear { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: 1px solid currentColor; color: inherit; opacity: .75; border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.gx-sent-grid { display: flex; flex-direction: row !important; flex-wrap: wrap; gap: 10px; }
+.gx-sent-img { padding: 0; border: 1px solid rgba(120,160,255,.35) !important; border-radius: 12px !important; overflow: hidden; background: #0b1424 !important; cursor: pointer; }
+.gx-sent-img img { display: block; width: min(150px, 40vw); height: min(150px, 40vw); object-fit: cover; }
+.gx-sent-item { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+/* User question text: no huge gaps between paragraphs and lists */
+.is-user .gx-msg-text { white-space: normal; }
+.is-user .gx-msg-text p { white-space: pre-wrap; margin: 0 0 .5em; }
+.is-user .gx-msg-text ol, .is-user .gx-msg-text ul { margin: .25em 0 .5em; padding-left: 1.5em; }
+.is-user .gx-msg-text li { margin: 0 0 .2em; }
+.is-user .gx-msg-text li > p { margin: 0; }
+.is-user .gx-msg-text > :last-child { margin-bottom: 0; }
+
+/* ---- Password show / hide ---- */
+.gx-pass-wrap { position: relative; }
+.gx-pass-wrap input { padding-right: 48px !important; }
+.gx-pass-toggle { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); margin-top: -8px; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: transparent; color: #8dc6ff; cursor: pointer; }
+.gx-pass-toggle:hover { background: rgba(141, 198, 255, .12); }

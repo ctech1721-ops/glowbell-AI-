@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import { supabase } from "./supabaseClient";
+import { Eye, EyeOff } from "lucide-react";
 import GlobalLogo from "./GlobalLogo";
 
 export default function Auth({ onLogin, onOwnerLogin }) {
@@ -8,6 +9,7 @@ export default function Auth({ onLogin, onOwnerLogin }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -138,11 +140,19 @@ export default function Auth({ onLogin, onOwnerLogin }) {
           placeholder="Enter your email" />
 
         <label htmlFor="password">Password</label>
-        <input id="password" type="password" required value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          minLength={mode === "signup" ? 12 : 1}
-          placeholder={mode === "signup" ? "12+ characters, number and symbol" : "Enter your password"} />
+        <div className="gx-pass-wrap">
+          <input id="password" type={showPassword ? "text" : "password"} required value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            minLength={mode === "signup" ? 12 : 1}
+            placeholder={mode === "signup" ? "12+ characters, number and symbol" : "Enter your password"} />
+          <button type="button" className="gx-pass-toggle"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            title={showPassword ? "Hide password" : "Show password"}>
+            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+        </div>
 
         {error && <p role="alert" className="gx-auth-error">{error}</p>}
         {notice && <p role="status" className="gx-auth-notice">{notice}</p>}

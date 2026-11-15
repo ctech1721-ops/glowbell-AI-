@@ -115,6 +115,93 @@ const TEXT_EXTENSIONS = ["txt", "csv", "md"];
 const FILE_INPUT_ACCEPT =
   "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif,.pdf,.docx,.txt,.csv,.md";
 
+const MAX_ATTACHMENTS = 3;
+const MAX_IMAGE_SIDE = 1600;
+
+// Old saved chats have a single `attachment`; new ones have `attachments`.
+function getMessageAttachments(message) {
+  if (Array.isArray(message?.attachments)) return message.attachments;
+  return message?.attachment ? [message.attachment] : [];
+}
+
+// Convert \( \) and \[ \] math delimiters (and bare bracket blocks) to $ and $$ so KaTeX renders them.
+function normalizeMath(text) {
+  if (typeof text !== "string" || !text) return text;
+  const display = (inner) => `\n\n$$\n${inner.trim()}\n$$\n\n`;
+  // Leave code blocks and inline code untouched.
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      let out = part;
+      // \[ ... \]  and  \( ... \)
+      out = out.replace(/\\{1,2}\[([\s\S]+?)\\{1,2}\]/g, (_m, inner) => display(inner));
+      out = out.replace(/\\{1,2}\(([\s\S]+?)\\{1,2}\)/g, (_m, inner) => `$${inner.trim()}$`);
+      // Bare "[ \frac{1}{2} ]" lines (single or multi-line) that hold LaTeX commands.
+      out = out.replace(/^[ \t]*\[[ \t]*\n?([^\]]*?\\[a-zA-Z]+[^\]]*?)\n?[ \t]*\][ \t]*$/gm, (_m, inner) => display(inner));
+      // Single-line $$ ... $$ must be a real display block (own lines).
+      out = out.replace(/^[ \t]*\$\$([^\n$]+?)\$\$[ \t]*$/gm, (_m, inner) => display(inner));
+      // KaTeX has no rupee glyph: draw it with a normal font through a macro.
+      out = out.replace(/\$\$[\s\S]+?\$\$|\$[^$\n]+\$/g, (m) => m.replace(/₹/g, "\\rupee "));
+      return out;
+    })
+    .join("");
+}
+
+const KATEX_OPTIONS = {
+  strict: false,
+  trust: (context) => context.command === "\\htmlStyle",
+  macros: { "\\rupee": "\\htmlStyle{font-family:sans-serif;font-style:normal}{₹}" },
+};
+
+// Shrink big photos so 3 images stay small enough to send.
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+        const width = Math.max(1, Math.round(img.naturalWidth * scale));
+        const height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        URL.revokeObjectURL(url);
+        resolve(dataUrl.startsWith("data:image/jpeg") ? dataUrl : null);
+      } catch {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read the file. Please try again."));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Pasted questions often carry many blank lines (or invisible spaces); keep at most one blank line.
+function tidyUserText(text) {
+  return String(text || "")
+    .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, " ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function createId() {
   return crypto.randomUUID();
 }
@@ -134,22 +221,20 @@ function sanitizeMessages(messages) {
       ...safeMessage
     } = message;
 
-    if (!safeMessage.attachment) return safeMessage;
+    const list = getMessageAttachments(safeMessage);
+    if (!list.length) return safeMessage;
 
-    const {
-      data,
-      previewUrl,
-      ...info
-    } = safeMessage.attachment;
+    const { attachment: _legacy, attachments: _list, ...rest } = safeMessage;
 
     return {
-      ...safeMessage,
-      attachment: {
-        ...info,
-        hasImage: Boolean(
-          data || previewUrl || safeMessage.attachment.hasImage
-        ),
-      },
+      ...rest,
+      attachments: list.map((item) => {
+        const { data, previewUrl, ...info } = item;
+        return {
+          ...info,
+          hasImage: Boolean(data || previewUrl || item.hasImage),
+        };
+      }),
     };
   });
 }
@@ -263,11 +348,11 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
 
   // File selected for the next message.
-  const [selectedAttachment, setSelectedAttachment] = useState(null);
+  const [selectedAttachments, setSelectedAttachments] = useState([]);
 
   // Private in-memory context for this chat. Not saved to Supabase.
   // Reuse this attachment for follow-up questions until a new chat is opened.
-  const [contextAttachment, setContextAttachment] = useState(null);
+  const [contextAttachments, setContextAttachments] = useState([]);
 
   const [viewerImageUrl, setViewerImageUrl] = useState("");
   const fileInputRef = useRef(null);
@@ -430,7 +515,7 @@ export default function App() {
       setHistory([]);
       setCurrentChatId(null);
       setMessages([]);
-      setContextAttachment(null);
+      setContextAttachments([]);
       return;
     }
 
@@ -521,30 +606,28 @@ export default function App() {
       .map((item) => ({ role: item.role, content: item.content }));
   }
 
-  function getRequestAttachment(attachment) {
-    if (!attachment?.data) return null;
-    return {
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      data: attachment.data,
-    };
+  function getRequestAttachments(list) {
+    return (list || [])
+      .filter((item) => item?.data)
+      .slice(0, MAX_ATTACHMENTS)
+      .map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data }));
   }
 
   async function sendMessage(text = input, opts = {}) {
-    const message = text.trim();
-    const newlySelectedAttachment = "attachment" in opts ? opts.attachment : selectedAttachment;
+    const message = tidyUserText(text);
+    const newlySelected = "attachments" in opts ? (opts.attachments || []) : selectedAttachments;
 
-    // If no new file is selected, reuse the current chat's image/file.
-    const attachment = newlySelectedAttachment || contextAttachment;
+    // If no new files are selected, reuse the current chat's images/files.
+    const attachments = newlySelected.length ? newlySelected : contextAttachments;
 
-    if ((!message && !attachment) || loading) return;
+    if ((!message && !attachments.length) || loading) return;
 
     const finalMessage = message ||
-      `Please analyze the attached file: ${attachment.name}`;
+      `Please analyze the attached ${attachments.length > 1 ? "files" : "file"}: ${attachments.map((a) => a.name).join(", ")}`;
 
     setError("");
     setSidebarOpen(false);
-    if (message === input.trim()) setInput("");
+    if (message === tidyUserText(input)) setInput("");
 
     const baseMessages = opts.base ?? messages;
     const chatId = currentChatId || createId();
@@ -556,8 +639,8 @@ export default function App() {
         ts: Date.now(),
         content: finalMessage,
         // Only show an attachment thumbnail for a newly uploaded file.
-        ...(newlySelectedAttachment
-          ? { attachment: newlySelectedAttachment }
+        ...(newlySelected.length
+          ? { attachments: newlySelected }
           : {}),
       },
     ];
@@ -575,7 +658,7 @@ export default function App() {
         signal: (abortRef.current = new AbortController()).signal,
         body: JSON.stringify({
           message: finalMessage,
-          attachment: getRequestAttachment(attachment),
+          attachments: getRequestAttachments(attachments),
           preferences: buildPreferences(),
           previousExcel: getPreviousExcel(baseMessages),
           history: getRequestHistory(baseMessages),
@@ -623,9 +706,9 @@ export default function App() {
       startTyping(updatedMessages.length - 1, data.answer);
 
       // Keep the file in React state for subsequent follow-up questions.
-      if (attachment) setContextAttachment(attachment);
+      if (attachments.length) setContextAttachments(attachments);
 
-      setSelectedAttachment(null);
+      setSelectedAttachments([]);
       await saveConversation(chatId, updatedMessages);
     } catch (err) {
       if (err?.name !== "AbortError") {
@@ -711,25 +794,23 @@ export default function App() {
   // --------------------------------------------------
 
   function handleFileChange(event) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
-    processFile(file);
+    processFiles(files);
   }
 
   function handlePaste(event) {
-    const file = Array.from(event.clipboardData?.files || [])[0];
-    if (file) {
+    const files = Array.from(event.clipboardData?.files || []);
+    if (files.length) {
       event.preventDefault();
-      processFile(file);
+      processFiles(files);
     }
   }
 
-  function processFile(file) {
-    if (!file) return;
-
+  // Validate one file and turn it into an attachment object.
+  async function buildAttachment(file) {
     if (file.size > MAX_FILE_BYTES) {
-      setError("File size 7 MB-kku keezha irukkanum.");
-      return;
+      throw new Error(`${file.name || "File"} is too large. Each file must be under 7 MB.`);
     }
 
     const fileName = file.name || "uploaded-file";
@@ -739,13 +820,9 @@ export default function App() {
     const isImage =
       ALLOWED_IMAGE_MIMES.includes(fileType) ||
       Object.prototype.hasOwnProperty.call(IMAGE_MIME_BY_EXTENSION, extension);
-
     const isPdf = fileType === "application/pdf" || extension === "pdf";
-
     const isDocx = fileType === DOCX_MIME || extension === "docx";
-
     const isOldDoc = fileType === "application/msword" || extension === "doc";
-
     const isText =
       fileType === "text/plain" ||
       fileType === "text/csv" ||
@@ -753,64 +830,69 @@ export default function App() {
       TEXT_EXTENSIONS.includes(extension);
 
     if (isOldDoc) {
-      setError("Old .doc file support illai. Word file-ai .docx nu save pannitu upload pannunga.");
-      return;
+      throw new Error("Old .doc files are not supported. Please save the file as .docx and upload it again.");
     }
-
     if (!isImage && !isPdf && !isDocx && !isText) {
-      setError(
-        "Image (JPG, PNG, WEBP, GIF), PDF, Word (DOCX), TXT, CSV, MD files only allowed."
-      );
-      return;
+      throw new Error("Image (JPG, PNG, WEBP, GIF), PDF, Word (DOCX), TXT, CSV, MD files only allowed.");
     }
 
-    const reader = new FileReader();
+    let dataUrl = "";
+    let mimeType = fileType;
 
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      const commaIndex = dataUrl.indexOf(",");
-
-      if (commaIndex < 0) {
-        setError("File-ai read panna mudiyala.");
-        return;
-      }
-
-      // Decide the final MIME type.
-      let mimeType = fileType;
-
-      if (isImage) {
+    if (isImage) {
+      // Resize + convert to JPEG so up to 3 images stay light; fall back to the original.
+      dataUrl = await compressImage(file);
+      if (dataUrl) {
+        mimeType = "image/jpeg";
+      } else {
+        dataUrl = await readFileAsDataUrl(file);
         mimeType = ALLOWED_IMAGE_MIMES.includes(fileType)
           ? fileType
           : IMAGE_MIME_BY_EXTENSION[extension] || "image/jpeg";
-      } else if (isPdf) {
-        mimeType = "application/pdf";
-      } else if (isDocx) {
-        mimeType = DOCX_MIME;
-      } else if (isText) {
-        mimeType =
-          extension === "csv"
-            ? "text/csv"
-            : extension === "md"
-            ? "text/markdown"
-            : "text/plain";
       }
+    } else {
+      dataUrl = await readFileAsDataUrl(file);
+      if (isPdf) mimeType = "application/pdf";
+      else if (isDocx) mimeType = DOCX_MIME;
+      else mimeType = extension === "csv" ? "text/csv" : extension === "md" ? "text/markdown" : "text/plain";
+    }
 
-      setSelectedAttachment({
-        name: fileName,
-        mimeType,
-        data: dataUrl.slice(commaIndex + 1),
-        previewUrl: isImage ? dataUrl : "",
-        isImage,
-      });
+    const commaIndex = dataUrl.indexOf(",");
+    if (commaIndex < 0) throw new Error("Could not read the file. Please try again.");
 
-      setError("");
+    return {
+      id: createId(),
+      name: fileName,
+      mimeType,
+      data: dataUrl.slice(commaIndex + 1),
+      previewUrl: isImage ? dataUrl : "",
+      isImage,
     };
+  }
 
-    reader.onerror = () => {
-      setError("File-ai read panna mudiyala.");
-    };
+  // Add up to 3 files (images, PDF, Word, TXT, CSV, MD) to the next message.
+  async function processFiles(fileList) {
+    const files = (fileList || []).filter(Boolean);
+    if (!files.length) return;
 
-    reader.readAsDataURL(file);
+    const room = MAX_ATTACHMENTS - selectedAttachments.length;
+    if (room <= 0) {
+      setError(`You can add a maximum of ${MAX_ATTACHMENTS} files. Remove one file to add another.`);
+      return;
+    }
+
+    const accepted = files.slice(0, room);
+    const results = await Promise.allSettled(accepted.map(buildAttachment));
+    const ready = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+    const failed = results.find((r) => r.status === "rejected");
+
+    if (ready.length) {
+      setSelectedAttachments((prev) => [...prev, ...ready].slice(0, MAX_ATTACHMENTS));
+    }
+
+    if (failed) setError(failed.reason?.message || "Could not read the file. Please try again.");
+    else if (files.length > room) setError(`You can add a maximum of ${MAX_ATTACHMENTS} files. Only the first ${room} ${room === 1 ? "file was" : "files were"} added.`);
+    else setError("");
   }
 
   function handleSubmit(event) {
@@ -833,7 +915,8 @@ export default function App() {
     const questionMessage = messages[questionIndex];
     const question = questionMessage.content;
     // Use the attachment on that question, or the current chat context.
-    const attachment = questionMessage.attachment || contextAttachment;
+    const questionFiles = getMessageAttachments(questionMessage);
+    const attachments = questionFiles.length ? questionFiles : contextAttachments;
 
     setLoading(true);
     setError("");
@@ -846,7 +929,7 @@ export default function App() {
         signal: (abortRef.current = new AbortController()).signal,
         body: JSON.stringify({
           message: question,
-          attachment: getRequestAttachment(attachment),
+          attachments: getRequestAttachments(attachments),
           preferences: buildPreferences(),
           previousExcel: getPreviousExcel(messages.slice(0, questionIndex)),
           history: getRequestHistory(messages.slice(0, questionIndex)),
@@ -890,7 +973,7 @@ export default function App() {
 
       setMessages(nextMessages);
       startTyping(answerIndex, data.answer);
-      if (attachment) setContextAttachment(attachment);
+      if (attachments.length) setContextAttachments(attachments);
       if (currentChatId) await saveConversation(currentChatId, nextMessages);
     } catch (err) {
       if (err?.name !== "AbortError") setError(err.message || "Could not regenerate the answer.");
@@ -924,7 +1007,7 @@ export default function App() {
     if (!nextMessages.length) {
       await deleteChatFromDatabase(currentChatId);
       setCurrentChatId(null);
-      setContextAttachment(null);
+      setContextAttachments([]);
     } else {
       await saveConversation(currentChatId, nextMessages);
     }
@@ -955,8 +1038,8 @@ export default function App() {
     setInput("");
     setError("");
     setCopiedIndex(-1);
-    setSelectedAttachment(null);
-    setContextAttachment(null);
+    setSelectedAttachments([]);
+    setContextAttachments([]);
     setSidebarOpen(false);
     setViewerImageUrl("");
     setTyping(null);
@@ -973,9 +1056,9 @@ export default function App() {
     setInput("");
     setError("");
     setCopiedIndex(-1);
-    setSelectedAttachment(null);
+    setSelectedAttachments([]);
     // Saved history intentionally doesn't contain the actual file bytes.
-    setContextAttachment(null);
+    setContextAttachments([]);
     setSidebarOpen(false);
     setViewerImageUrl("");
     setTyping(null);
@@ -1005,8 +1088,8 @@ export default function App() {
       setMessages([]);
       setInput("");
       setError("");
-      setSelectedAttachment(null);
-      setContextAttachment(null);
+      setSelectedAttachments([]);
+      setContextAttachments([]);
     }
   }
 
@@ -1024,8 +1107,8 @@ export default function App() {
     setHistory([]);
     setMessages([]);
     setCurrentChatId(null);
-    setSelectedAttachment(null);
-    setContextAttachment(null);
+    setSelectedAttachments([]);
+    setContextAttachments([]);
     setInput("");
     setError("");
   }
@@ -1050,8 +1133,8 @@ export default function App() {
     setMessages([]);
     setInput("");
     setError("");
-    setSelectedAttachment(null);
-    setContextAttachment(null);
+    setSelectedAttachments([]);
+    setContextAttachments([]);
   }
 
   async function copyAnswer(content, index) {
@@ -1263,7 +1346,7 @@ export default function App() {
     setEditingIndex(-1);
     sendMessage(text, {
       base: messages.slice(0, index),
-      attachment: original.attachment?.data ? original.attachment : null,
+      attachments: getMessageAttachments(original).filter((item) => item.data),
     });
   }
 
@@ -1297,35 +1380,102 @@ export default function App() {
 
   const speechSupported = Boolean(SpeechRec);
 
-  function toggleListening() {
+  function voiceErrorMessage(code) {
+    switch (code) {
+      case "not-allowed":
+      case "service-not-allowed":
+        return "Microphone access is blocked. Click the lock icon in the address bar, allow the Microphone, then refresh the page.";
+      case "no-speech":
+        return "No speech was detected. Speak close to the microphone and tap the mic button again.";
+      case "audio-capture":
+        return "No microphone was found. Check that a microphone is connected.";
+      case "network":
+        return "Voice input needs an internet connection. Please check it and try again.";
+      case "language-not-supported":
+        return "This voice language is not supported. Choose another language in Settings.";
+      case "aborted":
+        return "";
+      default:
+        return `Voice input error: ${code}`;
+    }
+  }
+
+  async function toggleListening() {
     if (listening) {
       recogRef.current?.stop();
       return;
     }
-    if (!SpeechRec) return;
+    if (!SpeechRec) {
+      setError("Voice input is not supported in this browser. Please use Chrome, Edge or Safari.");
+      return;
+    }
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      setError("Voice input works only on https or localhost pages.");
+      return;
+    }
+
+    setError("");
+
+    // Ask for the microphone first. If the browser permission prompt opens while
+    // recognition is starting, recognition gets cancelled and no text is ever heard.
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err) {
+        const name = err?.name || "";
+        setError(
+          name === "NotFoundError" || name === "DevicesNotFoundError"
+            ? voiceErrorMessage("audio-capture")
+            : voiceErrorMessage("not-allowed")
+        );
+        return;
+      }
+    }
+
     const recognition = new SpeechRec();
-    recognition.lang = prefs.voiceLang;
+    recognition.lang = prefs.voiceLang || "en-IN";
     recognition.interimResults = true;
     recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
     const base = input ? `${input.trimEnd()} ` : "";
+    let finalText = "";
+    let heardAnything = false;
+    let failed = false;
+
     recognition.onresult = (event) => {
-      let text = "";
-      for (const result of event.results) text += result[0].transcript;
-      setInput(base + text);
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const transcript = result[0]?.transcript || "";
+        if (result.isFinal) finalText += transcript;
+        else interim += transcript;
+      }
+      if (finalText || interim) heardAnything = true;
+      setInput(`${base}${finalText}${interim}`.replace(/\s{2,}/g, " "));
     };
     recognition.onerror = (event) => {
+      failed = true;
       setListening(false);
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        setError("Microphone access is blocked. Allow the microphone in your browser settings.");
-      }
+      const message = voiceErrorMessage(event.error);
+      if (message) setError(message);
     };
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      setListening(false);
+      recogRef.current = null;
+      if (!heardAnything && !failed) setError(voiceErrorMessage("no-speech"));
+      inputRef.current?.focus();
+    };
+
     recogRef.current = recognition;
     try {
       recognition.start();
       setListening(true);
     } catch {
       setListening(false);
+      recogRef.current = null;
+      setError("Voice input could not start. Please try again in a moment.");
     }
   }
 
@@ -1356,8 +1506,8 @@ export default function App() {
     // Start from a clean slate so saved and unsaved chats never mix.
     setCurrentChatId(null);
     setMessages([]);
-    setContextAttachment(null);
-    setSelectedAttachment(null);
+    setContextAttachments([]);
+    setSelectedAttachments([]);
     setError("");
   }
 
@@ -1438,11 +1588,11 @@ export default function App() {
       className={`global-app gb-with-sidebar gx-app${sideCollapsed ? " is-collapsed" : ""}`}
       onDragOver={(e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); setDragging(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
-      onDrop={(e) => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer?.files?.[0]); }}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); processFiles(Array.from(e.dataTransfer?.files || [])); }}
     >
       {showIntro && <StartIntro onDone={endIntro} />}
       {showGuide && <WelcomeGuide name={userName} onComplete={finishGuide} />}
-      {dragging && <div className="gx-drop"><Paperclip size={34} /><strong>Drop a file to attach</strong><span>Images, PDF, Word, TXT, CSV, MD</span></div>}
+      {dragging && <div className="gx-drop"><Paperclip size={34} /><strong>Drop up to 3 files to attach</strong><span>Images, PDF, Word, TXT, CSV, MD</span></div>}
       {showSettings && (
         <SettingsPanel prefs={prefs} onChange={updatePrefs} onClose={() => setShowSettings(false)} />
       )}
@@ -1671,9 +1821,9 @@ export default function App() {
                 const showDay = isUser && message.ts;
                 const isTyping = typing?.index === index;
                 const shownText = isUser
-                  ? message.content
+                  ? tidyUserText(message.content)
                   : removeAnswerSources(message.content);
-                const displayText = isTyping ? balanceMarkdown(shownText.slice(0, typing.shown)) : shownText;
+                const displayText = normalizeMath(isTyping ? balanceMarkdown(shownText.slice(0, typing.shown)) : shownText);
 
                 return (
                   <div key={`${message.role}-${index}`} className="gx-msg-wrap">
@@ -1706,7 +1856,7 @@ export default function App() {
                           <div className="gb-message-text gx-msg-text">
                             <ReactMarkdown
                               remarkPlugins={[remarkGfm, remarkMath]}
-                              rehypePlugins={[rehypeKatex]}
+                              rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
                               components={mdComponents}
                             >
                               {displayText}
@@ -1723,24 +1873,24 @@ export default function App() {
                           </div>
                         )}
 
-                        {isUser && message.attachment && (
-                          <div className="gb-message-attachment">
-                            {message.attachment.isImage && message.attachment.previewUrl ? (
-                              <>
-                                <img src={message.attachment.previewUrl} alt="Uploaded image" className="gb-sent-thumbnail" />
-                                <button type="button" onClick={() => setViewerImageUrl(message.attachment.previewUrl)}>
-                                  <Eye size={15} /> View image
+                        {isUser && getMessageAttachments(message).length > 0 && (
+                          <div className="gb-message-attachment gx-sent-grid">
+                            {getMessageAttachments(message).map((item, i) => (
+                              item.isImage && item.previewUrl ? (
+                                <button type="button" className="gx-sent-img" key={item.id || i} title="Click to view image"
+                                  aria-label={`View image ${i + 1}`} onClick={() => setViewerImageUrl(item.previewUrl)}>
+                                  <img src={item.previewUrl} alt={`Uploaded image ${i + 1}`} />
                                 </button>
-                              </>
-                            ) : (
-                              <div className="gb-sent-file">
-                                <FileText size={18} />
-                                <span>{message.attachment.name}</span>
-                                {message.attachment.hasImage && message.attachment.isImage && (
-                                  <span>(preview unavailable in saved history)</span>
-                                )}
-                              </div>
-                            )}
+                              ) : (
+                                <div className="gb-sent-file gx-sent-item" key={item.id || i}>
+                                  <FileText size={18} />
+                                  <span>{item.name}</span>
+                                  {item.hasImage && item.isImage && (
+                                    <span>(preview unavailable in saved history)</span>
+                                  )}
+                                </div>
+                              )
+                            ))}
                           </div>
                         )}
 
@@ -1844,34 +1994,54 @@ export default function App() {
         <footer className="gx-composer">
           {error && <div className="gb-error gx-error" role="alert">{error}</div>}
 
-          <input ref={fileInputRef} type="file" accept={FILE_INPUT_ACCEPT} hidden onChange={handleFileChange} />
+          <input ref={fileInputRef} type="file" accept={FILE_INPUT_ACCEPT} multiple hidden onChange={handleFileChange} />
 
-          {selectedAttachment && (
-            <div className="gb-attachment-preview gx-attach">
-              {selectedAttachment.isImage ? (
-                <img src={selectedAttachment.previewUrl} alt="Selected upload preview" className="gb-attachment-thumbnail" />
-              ) : <FileText size={25} />}
-              <span className="gb-attachment-name">{selectedAttachment.name}</span>
-              {selectedAttachment.isImage && (
-                <button type="button" onClick={() => setViewerImageUrl(selectedAttachment.previewUrl)}>
-                  <Eye size={15} /> View
-                </button>
-              )}
-              <button type="button" aria-label="Remove attachment" onClick={() => setSelectedAttachment(null)}>
-                <X size={16} />
-              </button>
+          {selectedAttachments.length > 0 && (
+            <div className="gx-attach-row" aria-label="Selected files">
+              {selectedAttachments.map((item, i) => (
+                <div className="gx-thumb" key={item.id || `${item.name}-${i}`}>
+                  {item.isImage ? (
+                    <button type="button" className="gx-thumb-open" title="Click to view image" aria-label={`View ${item.name}`}
+                      onClick={() => setViewerImageUrl(item.previewUrl)}>
+                      <img src={item.previewUrl} alt={item.name} />
+                    </button>
+                  ) : (
+                    <div className="gx-thumb-file" title={item.name}>
+                      <FileText size={26} />
+                      <span>{item.name}</span>
+                    </div>
+                  )}
+                  <button type="button" className="gx-thumb-remove" aria-label={`Remove ${item.name}`} title="Remove"
+                    onClick={() => setSelectedAttachments((prev) => prev.filter((_, idx) => idx !== i))}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+              <small className="gx-attach-count">{selectedAttachments.length}/{MAX_ATTACHMENTS} files</small>
             </div>
           )}
 
-          {!selectedAttachment && contextAttachment && (
-            <div className="gb-attachment-preview gx-attach">
-              {contextAttachment.isImage ? (
-                <img src={contextAttachment.previewUrl} alt="Current chat image context" className="gb-attachment-thumbnail" />
-              ) : <FileText size={25} />}
-              <span className="gb-attachment-name">Context retained: {contextAttachment.name}</span>
-              <button type="button" onClick={() => setContextAttachment(null)}
-                title="Stop using previous file for follow-up questions" aria-label="Clear retained file context">
-                <X size={16} />
+          {!selectedAttachments.length && contextAttachments.length > 0 && (
+            <div className="gx-attach-row" aria-label="Files kept for follow-up questions">
+              {contextAttachments.map((item, i) => (
+                <div className="gx-thumb is-context" key={item.id || `${item.name}-${i}`}>
+                  {item.isImage ? (
+                    <button type="button" className="gx-thumb-open" title="Click to view image" aria-label={`View ${item.name}`}
+                      onClick={() => setViewerImageUrl(item.previewUrl)}>
+                      <img src={item.previewUrl} alt={item.name} />
+                    </button>
+                  ) : (
+                    <div className="gx-thumb-file" title={item.name}>
+                      <FileText size={26} />
+                      <span>{item.name}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <small className="gx-attach-count">Used for follow-up questions</small>
+              <button type="button" className="gx-attach-clear" onClick={() => setContextAttachments([])}
+                title="Stop using these files for follow-up questions" aria-label="Clear retained files">
+                <X size={14} /> Clear
               </button>
             </div>
           )}
@@ -1930,7 +2100,7 @@ export default function App() {
               </button>
             ) : (
               <button className="gx-send" type="submit" aria-label="Send message"
-                disabled={!input.trim() && !selectedAttachment}>
+                disabled={!input.trim() && !selectedAttachments.length}>
                 <Send size={20} />
               </button>
             )}
