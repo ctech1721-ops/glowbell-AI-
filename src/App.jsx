@@ -239,6 +239,14 @@ function sanitizeMessages(messages) {
   });
 }
 
+// Detects "create a website" requests typed in the normal chat box.
+function isWebsiteRequest(text) {
+  const t = String(text || "").toLowerCase();
+  if (!/\b(website|web\s?site|web\s?page|webpage|landing\s?page|portfolio\s?site)\b/.test(t)) return false;
+  if (/\b(how|what|why|explain|steps|difference|meaning|tutorial|which|should)\b/.test(t)) return false;
+  return /\b(create|make|build|generate|design|develop|code|need|want)\b|pann|panni|seiy|seyy|venum|vendum|kudu|thaa|tha\b/.test(t);
+}
+
 function removeAnswerSources(content) {
   if (typeof content !== "string") return "";
   return content
@@ -346,6 +354,7 @@ export default function App() {
   const [isOwner, setIsOwner] = useState(false);
   const [ownerToken, setOwnerToken] = useState("");
   const [authReady, setAuthReady] = useState(false);
+  const [recovering, setRecovering] = useState(() => /type=recovery/.test(window.location.hash));
 
   // File selected for the next message.
   const [selectedAttachments, setSelectedAttachments] = useState([]);
@@ -459,6 +468,7 @@ export default function App() {
     let active = true;
 
     async function loadSession() {
+      if (/type=recovery/.test(window.location.hash)) setRecovering(true);
       const { data, error: sessionError } = await supabase.auth.getSession();
       if (!active) return;
       if (sessionError) console.error(sessionError.message);
@@ -470,6 +480,7 @@ export default function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        if (_event === "PASSWORD_RECOVERY") setRecovering(true);
         if (active) {
           setAuthUser(session?.user ?? null);
           setAuthReady(true);
@@ -652,6 +663,33 @@ export default function App() {
     try {
       await saveConversation(chatId, userMessages);
 
+      // Website request in normal chat -> same result as the Website Creator.
+      if (!attachments.length && isWebsiteRequest(finalMessage)) {
+        const siteResponse = await fetch("/api/create-website", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: (abortRef.current = new AbortController()).signal,
+          body: JSON.stringify({ prompt: finalMessage }),
+        });
+        const siteData = await siteResponse.json().catch(() => ({}));
+        if (!siteResponse.ok) throw new Error(siteData.error || "Website creation failed.");
+        if (!siteData.files || typeof siteData.files["index.html"] !== "string") {
+          throw new Error("AI did not return a valid index.html. Please try a clearer description.");
+        }
+        const siteMessages = [
+          ...userMessages,
+          {
+            role: "assistant",
+            ts: Date.now(),
+            content: `Your website **${siteData.name || "my-website"}** is ready. Click **View** to preview it, or **Download ZIP** to get the files.`,
+            website: { name: siteData.name || "my-website", files: siteData.files },
+          },
+        ];
+        setMessages(siteMessages);
+        await saveConversation(chatId, siteMessages);
+        return;
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -746,9 +784,9 @@ export default function App() {
     }
   }
 
-  function getWebsitePreview() {
-    if (!generatedWebsite) return "";
-    const files = generatedWebsite.files;
+  function getWebsitePreview(site = generatedWebsite) {
+    if (!site) return "";
+    const files = site.files;
     let html = files["index.html"];
     const cssText = files["style.css"] || "";
     const jsText = files["script.js"] || "";
@@ -772,16 +810,26 @@ export default function App() {
     return html;
   }
 
-  async function downloadWebsiteZip() {
-    if (!generatedWebsite) return;
+  function viewWebsite(site) {
+    const preview = window.open("", "_blank");
+    if (preview) {
+      preview.opener = null;
+      preview.document.open();
+      preview.document.write(getWebsitePreview(site));
+      preview.document.close();
+    } else setError("Allow pop-ups to view your website preview.");
+  }
+
+  async function downloadWebsiteZip(site = generatedWebsite) {
+    if (!site) return;
     const zip = new JSZip();
-    Object.entries(generatedWebsite.files).forEach(([fileName, content]) => zip.file(fileName, content));
-    zip.file("README.md", `# ${generatedWebsite.name}\n\nGenerated with Global AI.\n\nOpen index.html in a browser, or open this folder in VS Code to edit the HTML, CSS and JavaScript files.`);
+    Object.entries(site.files).forEach(([fileName, content]) => zip.file(fileName, content));
+    zip.file("README.md", `# ${site.name}\n\nGenerated with Global AI.\n\nOpen index.html in a browser, or open this folder in VS Code to edit the HTML, CSS and JavaScript files.`);
     const blob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${generatedWebsite.name || "my-website"}.zip`;
+    anchor.download = `${site.name || "my-website"}.zip`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -1548,10 +1596,12 @@ export default function App() {
   if (isOwnerRoute) return <OwnerDashboard />;
   if (!authReady) return <><div className="gx-boot">Loading Global AI...</div>{showIntro && <StartIntro onDone={endIntro} />}</>;
 
-  if (!authUser && !isOwner) {
+  if ((!authUser || recovering) && !isOwner) {
     return (
       <>
         <Auth
+          recovery={recovering}
+          onRecoveryDone={() => setRecovering(false)}
           onLogin={setAuthUser}
           onOwnerLogin={(token) => {
             setOwnerToken(token);
@@ -1642,7 +1692,7 @@ export default function App() {
                       preview.document.close();
                     } else setWebsiteError("Allow pop-ups to view your website preview.");
                   }}><Eye size={16} /> View</button>
-                  <button type="button" onClick={downloadWebsiteZip}><Download size={16} /> Download ZIP</button>
+                  <button type="button" onClick={() => downloadWebsiteZip(generatedWebsite)}><Download size={16} /> Download ZIP</button>
                 </div>
                 <p className="gb-website-help">Download ZIP pannitu extract செய்து VS Code-la folder open pannalaam.</p>
               </div>
@@ -1862,6 +1912,19 @@ export default function App() {
                               {displayText}
                             </ReactMarkdown>
                             {isTyping && <span className="gx-caret" aria-hidden="true" />}
+
+                            {message.website?.files && (
+                              <div className="gb-website-result">
+                                <div className="gb-website-result-title">
+                                  <strong>{message.website.name}</strong>
+                                  <span>{Object.keys(message.website.files).join(" · ")}</span>
+                                </div>
+                                <div className="gb-website-actions">
+                                  <button type="button" onClick={() => viewWebsite(message.website)}><Eye size={16} /> View</button>
+                                  <button type="button" onClick={() => downloadWebsiteZip(message.website)}><Download size={16} /> Download ZIP</button>
+                                </div>
+                              </div>
+                            )}
 
                             {message.excelDownloadUrl && (
                               <a href={message.excelDownloadUrl}

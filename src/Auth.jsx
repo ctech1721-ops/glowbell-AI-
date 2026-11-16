@@ -1,11 +1,12 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { Eye, EyeOff } from "lucide-react";
 import GlobalLogo from "./GlobalLogo";
 
-export default function Auth({ onLogin, onOwnerLogin }) {
-  const [mode, setMode] = useState("signup");
+export default function Auth({ onLogin, onOwnerLogin, recovery = false, onRecoveryDone }) {
+  const [mode, setMode] = useState(recovery ? "reset" : "signup");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,10 +16,64 @@ export default function Auth({ onLogin, onOwnerLogin }) {
   const [loading, setLoading] = useState(false);
   const [ownerToken, setOwnerToken] = useState("");
 
+  useEffect(() => {
+    if (recovery) { setMode("reset"); setError(""); setNotice(""); }
+  }, [recovery]);
+
+  const strongPassword = (p) =>
+    p.length >= 12 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p) && /[^A-Za-z0-9]/.test(p);
+
+  async function handleForgot() {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) { setError("Please enter your email address."); return; }
+    setLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: import.meta.env.VITE_SITE_URL || window.location.origin,
+      });
+      if (resetError) throw resetError;
+      setNotice("Password reset link sent. Open the link in your email to set a new password.");
+    } catch (err) {
+      setError(err.message || "Could not send reset email.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleReset() {
+    if (!strongPassword(password)) {
+      setError("Password must have 12+ characters, uppercase, lowercase, number and symbol.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("New password and confirm password do not match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) throw updateError;
+      await supabase.auth.signOut();
+      try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+      setPassword("");
+      setConfirmPassword("");
+      setMode("login");
+      setNotice("Password updated successfully. Please log in with your new password.");
+      onRecoveryDone?.();
+    } catch (err) {
+      setError(err.message || "Could not update password.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setNotice("");
+
+    if (mode === "forgot") { await handleForgot(); return; }
+    if (mode === "reset") { await handleReset(); return; }
 
     const cleanEmail = email.trim().toLowerCase();
 
@@ -122,7 +177,10 @@ export default function Auth({ onLogin, onOwnerLogin }) {
         <GlobalLogo size={96} animate="loop" className="gx-auth-logo" />
         <h1>Global <b>AI</b></h1>
         <p className="gx-auth-sub">
-          {mode === "signup" ? "Create your account" : "Welcome back"}
+          {mode === "signup" ? "Create your account"
+            : mode === "forgot" ? "Reset your password"
+            : mode === "reset" ? "Set a new password"
+            : "Welcome back"}
         </p>
 
         {mode === "signup" && (
@@ -134,18 +192,23 @@ export default function Auth({ onLogin, onOwnerLogin }) {
           </>
         )}
 
-        <label htmlFor="email">Email address</label>
-        <input id="email" type="email" required value={email}
-          onChange={(e) => setEmail(e.target.value)} autoComplete="email"
-          placeholder="Enter your email" />
+        {mode !== "reset" && (
+          <>
+            <label htmlFor="email">Email address</label>
+            <input id="email" type="email" required value={email}
+              onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+              placeholder="Enter your email" />
+          </>
+        )}
 
-        <label htmlFor="password">Password</label>
+        {mode !== "forgot" && (<>
+        <label htmlFor="password">{mode === "reset" ? "New password" : "Password"}</label>
         <div className="gx-pass-wrap">
           <input id="password" type={showPassword ? "text" : "password"} required value={password}
             onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            minLength={mode === "signup" ? 12 : 1}
-            placeholder={mode === "signup" ? "12+ characters, number and symbol" : "Enter your password"} />
+            autoComplete={mode === "signup" || mode === "reset" ? "new-password" : "current-password"}
+            minLength={mode === "signup" || mode === "reset" ? 12 : 1}
+            placeholder={mode === "signup" || mode === "reset" ? "12+ characters, number and symbol" : "Enter your password"} />
           <button type="button" className="gx-pass-toggle"
             onClick={() => setShowPassword((v) => !v)}
             aria-label={showPassword ? "Hide password" : "Show password"}
@@ -154,20 +217,45 @@ export default function Auth({ onLogin, onOwnerLogin }) {
           </button>
         </div>
 
+        {mode === "reset" && (
+          <>
+            <label htmlFor="confirm-password">Confirm password</label>
+            <div className="gx-pass-wrap">
+              <input id="confirm-password" type={showPassword ? "text" : "password"} required
+                value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password" placeholder="Re-enter new password" />
+            </div>
+          </>
+        )}
+
+        {mode === "login" && (
+          <button className="gx-auth-switch" type="button" style={{ marginTop: 0, textAlign: "right" }}
+            onClick={() => { setMode("forgot"); setError(""); setNotice(""); setPassword(""); }}>
+            Forgot password?
+          </button>
+        )}
+        </>)}
+
         {error && <p role="alert" className="gx-auth-error">{error}</p>}
         {notice && <p role="status" className="gx-auth-notice">{notice}</p>}
 
         <button className="gx-auth-submit" disabled={loading} type="submit">
-          {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Log in"}
+          {loading ? "Please wait..." : mode === "signup" ? "Create account"
+            : mode === "forgot" ? "Send reset link"
+            : mode === "reset" ? "Submit" : "Log in"}
         </button>
 
-        <button className="gx-auth-switch" type="button"
-          onClick={() => {
-            setMode(mode === "signup" ? "login" : "signup");
-            setError(""); setNotice(""); setPassword("");
-          }}>
-          {mode === "signup" ? "Already have an account? Log in" : "New to Global AI? Create account"}
-        </button>
+        {mode !== "reset" && (
+          <button className="gx-auth-switch" type="button"
+            onClick={() => {
+              setMode(mode === "signup" || mode === "forgot" ? "login" : "signup");
+              setError(""); setNotice(""); setPassword("");
+            }}>
+            {mode === "signup" ? "Already have an account? Log in"
+              : mode === "forgot" ? "Back to log in"
+              : "New to Global AI? Create account"}
+          </button>
+        )}
       </form>
     </main>
   );

@@ -12,6 +12,7 @@ dotenv.config({ override: true });
 
 const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
+const { chromium } = require("playwright");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -556,7 +557,7 @@ function isMathQuestion(message) {
   const text = String(message || "");
   if (/\b(solve|calculate|calculation|compute|evaluate|simplify|factori[sz]e|differentiate|integrate|derivative|integral|equation|percentage|percent|probability|average|mean|median|ratio|area of|volume of|perimeter|hypotenuse|sin|cos|tan|log|sqrt|square root|cube root|lcm|hcf|gcd|profit|loss|interest|speed|distance|matrix|determinant|quadratic|simultaneous|find the value|find x)\b/i.test(text)) return true;
   // Plain arithmetic such as "25 * 4 + 10", "12/4", "2^5", "(3+4)x5"
-  if (/\d\s*[-+*/^x×÷%]\s*\(?\d/.test(text)) return true;
+  if (/\d\s*[-+*/^xÃ—Ã·%]\s*\(?\d/.test(text)) return true;
   return false;
 }
 
@@ -565,11 +566,11 @@ function isMathQuestion(message) {
 // --------------------------------------------------
 
 function isIndiaCapitalQuestion(message) {
-  return /\b(capital of india|india['’]s capital|indian capital|what is the capital of india)\b/i.test(message);
+  return /\b(capital of india|india['â€™]s capital|indian capital|what is the capital of india)\b/i.test(message);
 }
 
 function isFranceCapitalQuestion(message) {
-  return /\b(capital of france|france['’]s capital|what is the capital of france)\b/i.test(message);
+  return /\b(capital of france|france['â€™]s capital|what is the capital of france)\b/i.test(message);
 }
 
 function isAustraliaPMQuestion(message) {
@@ -905,9 +906,9 @@ function getGuidedBuildReply(message) {
   if (/\b(using|with|for|in (html|react|python|java|flutter|node|php)|html|css|react|vue|angular|django|flask|php|flutter|kotlin|swift|about|called|named)\b/.test(text)) return null;
 
   if (/\b(website|web site|webpage|web page|site)\b/.test(text)) {
-    return `Great! 👍 Let's build your own professional website step by step — design, code, running it on your computer, and publishing it online.
+    return `Great! ðŸ‘ Let's build your own professional website step by step â€” design, code, running it on your computer, and publishing it online.
 
-### Step 1 – Tell me about your website
+### Step 1 â€“ Tell me about your website
 
 **1. What type of website?**
 - Business website
@@ -932,27 +933,27 @@ function getGuidedBuildReply(message) {
 - Login / Sign-up
 - Online payments
 - Admin dashboard
-- Not sure — suggest for me
+- Not sure â€” suggest for me
 
 You can answer in one line, for example:
 \`Portfolio, name: Chandru, dark theme, Home / About / Projects / Contact\`
 
-Once you answer, I'll give you **one command or file at a time**, check the result with you, and help fix any error before we move on. 🚀`;
+Once you answer, I'll give you **one command or file at a time**, check the result with you, and help fix any error before we move on. ðŸš€`;
   }
 
   if (/\b(app|application|android|ios|mobile)\b/.test(text)) {
-    return `Great! 👍 Let's plan and build your app step by step.
+    return `Great! ðŸ‘ Let's plan and build your app step by step.
 
-### Step 1 – Tell me about your app
+### Step 1 â€“ Tell me about your app
 
 **1. What kind of app?**
 - Android only
 - iPhone (iOS) only
 - Both Android and iPhone
 - Web app (works in the browser)
-- Not sure — help me decide
+- Not sure â€” help me decide
 
-**2. What should the app do?** (one or two lines — for example: *"order food from nearby shops"*)
+**2. What should the app do?** (one or two lines â€” for example: *"order food from nearby shops"*)
 
 **3. App name** (or say *"not sure"*)
 
@@ -970,13 +971,13 @@ Once you answer, I'll give you **one command or file at a time**, check the resu
 - Know some coding
 - Experienced developer
 
-Answer whatever you know — for anything you're unsure about, just say *"not sure"* and I'll recommend the best option. Then I'll take you through it **one small, verified step at a time**. 🚀`;
+Answer whatever you know â€” for anything you're unsure about, just say *"not sure"* and I'll recommend the best option. Then I'll take you through it **one small, verified step at a time**. ðŸš€`;
   }
 
   if (/\b(game)\b/.test(text)) {
-    return `Great! 🎮 Let's build your game step by step.
+    return `Great! ðŸŽ® Let's build your game step by step.
 
-### Step 1 – Tell me about your game
+### Step 1 â€“ Tell me about your game
 
 **1. Where should it run?**
 - Web browser
@@ -988,7 +989,7 @@ Answer whatever you know — for anything you're unsure about, just say *"not su
 - Arcade (jump, run, shoot)
 - Racing
 - Card / board game
-- Not sure — suggest one
+- Not sure â€” suggest one
 
 **3. 2D or 3D?**
 
@@ -996,7 +997,7 @@ Answer whatever you know — for anything you're unsure about, just say *"not su
 - Complete beginner
 - Know some coding
 
-Reply in one line, for example: \`Web browser, arcade, 2D, beginner\`. I'll then guide you with one small step at a time. 🚀`;
+Reply in one line, for example: \`Web browser, arcade, 2D, beginner\`. I'll then guide you with one small step at a time. ðŸš€`;
   }
 
   return null;
@@ -1008,7 +1009,7 @@ function getCasualGreetingReply(message, history = []) {
   // Handle standalone chat greetings before web search/model prompting. This
   // prevents slang greetings ("hyy", "hyyy") from being treated as vocabulary
   // questions, even when the user repeats them in the same conversation.
-  const greeting = /^(?:h+i+|h+e+y+|h+y+|hello+|good\s+morning|good\s+afternoon|good\s+evening)[.!?,\s❤️😊👋]*$/iu;
+  const greeting = /^(?:h+i+|h+e+y+|h+y+|hello+|good\s+morning|good\s+afternoon|good\s+evening)[.!?,\sâ¤ï¸ðŸ˜ŠðŸ‘‹]*$/iu;
   if (!greeting.test(text)) return null;
 
   const previousGreetingCount = history.filter((item) =>
@@ -1016,9 +1017,9 @@ function getCasualGreetingReply(message, history = []) {
   ).length;
 
   const replies = [
-    "Hey! 😊 How are you doing? What can I help you with today?",
-    "Hyy! 😊 Nice to hear from you again. What's up?",
-    "Heyyy! How's your day going? I'm here if you need anything. ❤️",
+    "Hey! ðŸ˜Š How are you doing? What can I help you with today?",
+    "Hyy! ðŸ˜Š Nice to hear from you again. What's up?",
+    "Heyyy! How's your day going? I'm here if you need anything. â¤ï¸",
   ];
   return replies[previousGreetingCount % replies.length];
 }
@@ -1081,9 +1082,16 @@ function parseGeneratedFiles(content) {
     }
   }
 
-  // HTML is compulsory
+   // HTML is compulsory
   if (!files["index.html"]?.trim()) {
     throw new Error("Generated website is missing index.html.");
+  }
+
+  // Validate that generated index.html is real HTML
+  if (!/<!doctype html|<html[\s>]/i.test(files["index.html"])) {
+    throw new Error(
+      "AI generated Markdown instead of HTML. Please generate the website again."
+    );
   }
 
   // CSS fallback
@@ -1122,6 +1130,22 @@ function parseGeneratedFiles(content) {
     `;
   }
 
+    // Basic generated code cleanup
+  for (const fileName of ["index.html", "style.css", "script.js"]) {
+    if (!files[fileName]) continue;
+
+    // Remove accidental Markdown image/link formatting from URLs
+    files[fileName] = files[fileName].replace(
+      /\[?(https?:\/\/[^\s"'()\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+      "$2"
+    );
+  }
+
+  // Fix common invalid CSS transition syntax
+  files["style.css"] = files["style.css"]
+    .replace(/\*background\*/g, "background")
+    .replace(/\*all\*/g, "all");
+
   return {
     name: String(parsed.name || "my-website")
       .replace(/[^a-z0-9_-]/gi, "-")
@@ -1130,6 +1154,44 @@ function parseGeneratedFiles(content) {
   };
 }
 
+
+async function testWebsiteResponsiveness(website) {
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    const html = website.files["index.html"] || "";
+    const css = website.files["style.css"] || "";
+
+    const widths = [320, 375, 390, 430, 768, 820, 1024, 1280, 1440];
+    const failures = [];
+
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 });
+
+      await page.setContent(
+        html.replace("</head>", `<style>${css}</style></head>`),
+        { waitUntil: "domcontentloaded" }
+      );
+
+      const result = await page.evaluate(() => ({
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+      }));
+
+      if (result.pageWidth > result.viewportWidth) {
+        failures.push(width);
+      }
+    }
+
+    return {
+      passed: failures.length === 0,
+      failures,
+    };
+  } finally {
+    await browser.close();
+  }
+}
 
 
 async function generateWebsiteFiles(prompt) {
@@ -1179,6 +1241,40 @@ CRITICAL HTML OUTPUT RULES:
 - Use real HTML anchor links such as href="#menu", not Markdown links.
 - Return all three files as JSON string values.
 
+CODE QUALITY AND VALIDATION REQUIREMENTS:
+
+- Generate valid, browser-compatible HTML5, CSS3 and vanilla JavaScript.
+- Never include Markdown syntax inside HTML, CSS or JavaScript files.
+- Never use Markdown links as image URLs.
+- Every image src and CSS background-image must contain a direct, valid image URL.
+- Use reliable HTTPS image URLs.
+- Do not generate broken, incomplete or placeholder image URLs.
+- Ensure every CSS property has valid syntax and values.
+- Never add unnecessary symbols such as * around CSS property names.
+- Ensure all HTML elements are properly opened and closed.
+- Ensure JavaScript selectors match elements that exist in the HTML.
+- Ensure all generated files work together without missing references.
+- Make the website responsive on desktop, tablet and mobile.
+- Before returning the JSON, review all three files for syntax errors and broken references.
+- Return only the required JSON structure.
+
+CONTENT COMPLETENESS REQUIREMENTS:
+
+- NEVER generate a website containing only a navigation bar and footer.
+- Every requested page and section must contain complete, visible content.
+- The homepage must include a hero section with a heading, description, image and call-to-action buttons.
+- Include at least 5 substantial content sections on the homepage.
+- For ecommerce websites, generate at least 12 product cards.
+- Every product card must include a relevant image, product name, price and Add to Cart button.
+- Include meaningful About, Contact and other requested sections with actual text and details.
+- Add realistic headings, paragraphs, descriptions, labels and useful content throughout the website.
+- Never leave sections empty or use placeholder text such as "Content goes here".
+- Do not create navigation links for sections that do not exist.
+- Ensure all images have valid image URLs and descriptive alt attributes.
+- Include enough HTML content to make the website visually complete immediately after opening index.html.
+- Implement working search, filters, cart and interactive buttons whenever requested.
+- Before returning JSON, verify that index.html contains the complete website and is not merely a skeleton.
+
 IMAGE AND BACKGROUND REQUIREMENTS:
 
 - Every website must include relevant real images based on the user's website idea.
@@ -1197,6 +1293,75 @@ IMAGE AND BACKGROUND REQUIREMENTS:
 - If a suitable image URL is unavailable, use a beautiful CSS background as a fallback.
 - Make the overall website visually rich and image-focused.
 - The images and background must match the user's exact website idea.
+
+UNIVERSAL RESPONSIVE DESIGN REQUIREMENTS:
+
+Every website must work perfectly on:
+- Small mobile: 320px to 374px
+- Standard mobile: 375px to 480px
+- Large mobile: 481px to 767px
+- Tablet: 768px to 1023px
+- iPad: portrait and landscape orientations
+- Laptop: 1024px to 1439px
+- Desktop: 1440px and above
+
+MANDATORY CSS:
+- Use mobile-first responsive CSS.
+- Use CSS Grid and Flexbox.
+- Use min-width: 0 for flexible grid and flex children where needed.
+- Use width: 100%, max-width and box-sizing: border-box.
+- Never force fixed desktop widths on mobile.
+- Avoid horizontal scrolling.
+- Use responsive typography with clamp().
+- Use responsive spacing with clamp().
+- Images and videos must never overflow their containers.
+- Use object-fit: cover or contain appropriately.
+- Use media queries at 1024px, 768px and 480px.
+- Make cards, columns and sections adapt to screen width.
+
+NAVIGATION:
+- Desktop: normal navigation.
+- Tablet: compact navigation with proper spacing.
+- Mobile: hamburger navigation with working open and close functionality.
+- Prevent navigation links from overflowing.
+
+LAYOUT:
+- Desktop: use suitable multi-column layouts.
+- Tablet: reduce columns and spacing.
+- Mobile: use single or two-column layouts where appropriate.
+- Forms, buttons, modals, tables and product cards must fit the viewport.
+- Ensure touch-friendly buttons and links.
+
+FINAL RESPONSIVE VALIDATION:
+- Review every generated HTML, CSS and JavaScript file.
+- Check layouts at 320px, 375px, 390px, 430px, 768px, 820px, 1024px, 1280px and 1440px.
+- Check both portrait and landscape tablet layouts.
+- Fix all horizontal overflow, overlapping elements and clipped content.
+- Never return a desktop-only design.
+- All responsive navigation and interactions must work.
+
+WEBSITE DESIGN VARIETY AND PROMPT-BASED STYLE REQUIREMENTS:
+
+1. NEVER use the same fixed website layout or design template for every request.
+2. First understand the user's website category, purpose, target audience and requested design style.
+3. If the user specifies a design style, follow it accurately. Examples: minimal, luxury, modern, futuristic, cinematic, editorial, glassmorphism, brutalist, playful, corporate or vintage.
+4. If the user does not specify a style, choose a creative design direction suitable for the website category.
+5. Every new website generation should have a noticeably different visual identity and layout.
+6. Vary the following elements:
+   - Header and navigation design
+   - Hero section layout and composition
+   - Color palette and background
+   - Typography and font combinations
+   - Section arrangement and page structure
+   - Product, service and portfolio card designs
+   - Buttons, borders, shadows and animations
+   - Footer design
+7. Match the layout to the requested website category. Do not use an ecommerce layout for a portfolio, restaurant, blog or dashboard.
+8. Avoid repeatedly using the same centered hero, three-column cards and identical section order.
+9. Do not randomly change or ignore the user's requested features just to create variety.
+10. Prioritize the user's exact requirements, functionality, content and responsive design.
+11. Create an original, professional design for every generation. Do not simply recolor or slightly modify a previous layout.
+12. Implement the chosen design directly in index.html, style.css and script.js.
 `;
 
   const response = await fetch(GROQ_URL, {
@@ -1220,26 +1385,53 @@ IMAGE AND BACKGROUND REQUIREMENTS:
       temperature: 0.2,
 max_completion_tokens: 10000,
 reasoning_format: "hidden",
-response_format: {
-  type: "json_object",
-},
+response_format: { type: "json_object" },
 }),
 signal: AbortSignal.timeout(90000),
 });
 
-  if (!response.ok) {
-    const details = await response.text();
 
-    console.error(
-      "Website AI error:",
-      response.status,
-      details
-    );
+if (!response.ok) {
+  const details = await response.text();
+
+  console.error("Website AI error:", response.status, details);
+
+  if (response.status === 429) {
+    let retryMinutes = 60;
+
+    try {
+      const errorData = JSON.parse(details);
+      const message = errorData?.error?.message || "";
+
+      const match = message.match(/try again in ([\d.]+)\s*(s|sec|seconds|m|min|minutes|h|hours)/i);
+
+      if (match) {
+        const amount = Number(match[1]);
+        const unit = match[2].toLowerCase();
+
+        retryMinutes = Math.max(
+          1,
+          Math.ceil(
+            unit.startsWith("h") ? amount * 60 :
+            unit.startsWith("m") ? amount :
+            amount / 60
+          )
+        );
+      }
+    } catch (error) {
+      console.warn("Could not read AI retry time.");
+    }
 
     throw new Error(
-      `Website AI service returned status ${response.status}: ${details.slice(0, 500)}`
+      `Your AI generation limit has been reached. Please try again in about ${retryMinutes} minutes.`
     );
   }
+
+  throw new Error(
+    `Website AI service returned status ${response.status}: ${details.slice(0, 500)}`
+  );
+}
+
 
   const data = await response.json();
 
@@ -1250,6 +1442,19 @@ signal: AbortSignal.timeout(90000),
   }
 
   const website = parseGeneratedFiles(content);
+
+
+  const responsiveCheck = await testWebsiteResponsiveness(website);
+
+  if (!responsiveCheck.passed) {
+    console.warn(
+      "Responsive issues detected at viewport widths:",
+      responsiveCheck.failures
+    );
+  } else {
+    console.log("Responsive check passed for all viewport widths.");
+  }
+
 
   if (
     !website.files["style.css"] ||
@@ -1274,7 +1479,7 @@ function buildSystemPrompt({
   }).format(new Date());
 
   return `
-You are Global AI — a capable, thoughtful, friendly AI assistant. Understand what the user actually needs and give the most useful answer, not a generic template.
+You are Global AI â€” a capable, thoughtful, friendly AI assistant. Understand what the user actually needs and give the most useful answer, not a generic template.
 
 Today's date is ${today} in the Asia/Kolkata timezone.
 CONVERSATION QUALITY ENGINE:
@@ -1351,7 +1556,7 @@ Respond to what the user actually says, not like a scripted chatbot.
 - Do not repeatedly mention that you are an AI when irrelevant.
 
 8. RESPONSE LENGTH
-- Simple casual messages: usually 1–3 sentences.
+- Simple casual messages: usually 1â€“3 sentences.
 - Emotional messages: respond thoughtfully without over-explaining.
 - Questions requiring explanations: provide enough detail.
 - Detailed requests: organize the answer clearly.
@@ -1380,7 +1585,7 @@ EXAMPLES:
 User: Edhachi pesalam.
 
 Assistant:
-Pesalam! 😄 Oru fun question: oru naal time travel panna
+Pesalam! ðŸ˜„ Oru fun question: oru naal time travel panna
 chance kidaicha, past-ku povingala illa future-ku povingala?
 
 User: Bore adikuthu.
@@ -1398,7 +1603,7 @@ Naan kekkuren; udane advice kudukka rush panna maatten.
 User: Enakku biryani romba pudikkum.
 
 Assistant:
-Biryani-na semma choice! 😄 Neenga usually chicken
+Biryani-na semma choice! ðŸ˜„ Neenga usually chicken
 biryani prefer pannuveengala, illa mutton biryaniya?
 
 STRICT RULES:
@@ -1446,7 +1651,7 @@ hobby or personal interest without asking for advice:
   tips, roadmaps or informational lists.
 - Do NOT assume the user wants to learn more.
 - First respond directly to what they shared.
-- Keep the response to 1–2 short sentences.
+- Keep the response to 1â€“2 short sentences.
 - Ask one natural follow-up question about their interest.
 - Only provide detailed information when explicitly requested.
 
