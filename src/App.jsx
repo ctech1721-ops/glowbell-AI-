@@ -272,6 +272,15 @@ function CodeBlock({ className, children, ...props }) {
 
   if (!match) return <code className={className} {...props}>{children}</code>;
 
+  if (language.toLowerCase() === "output") {
+    return (
+      <div className="gb-output-block">
+        <div className="gb-output-toolbar"><span>Output</span></div>
+        <pre><code>{code}</code></pre>
+      </div>
+    );
+  }
+
   return (
     <div className="gb-code-block">
       <div className="gb-code-toolbar">

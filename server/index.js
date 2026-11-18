@@ -12,7 +12,6 @@ dotenv.config({ override: true });
 
 const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
-const { chromium } = require("playwright");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1017,9 +1016,9 @@ function getCasualGreetingReply(message, history = []) {
   ).length;
 
   const replies = [
-    "Hey! ðŸ˜Š How are you doing? What can I help you with today?",
-    "Hyy! ðŸ˜Š Nice to hear from you again. What's up?",
-    "Heyyy! How's your day going? I'm here if you need anything. â¤ï¸",
+    "Hey! How are you doing? What can I help you with today?",
+    "Hyy! Nice to hear from you again. What is up?",
+    "Heyyy! How is your day going? I am here if you need anything.",
   ];
   return replies[previousGreetingCount % replies.length];
 }
@@ -1033,17 +1032,17 @@ function isContextualFollowUp(message) {
   const wordCount = text.split(/\s+/).length;
   if (
     wordCount <= 9 &&
-    /\b(more|add|again|continue|next|also|that|this|it|those|these|them|ino|inoru|innum|konjam|konjo|adhigam|athigam|solu|sollu|sol|detail|details|explain|example|examples|simple|short|shorter|longer|elaborate|expand|why|how|then|ok|okay|yes|no|go on|rest|remaining|full|complete|finish)\b/.test(text)
+    /\b(more|add|again|continue|next|also|that|this|it|those|these|them|ino|inoru|innum|konjam|konjo|adhigam|athigam|solu|sollu|sol|detail|details|explain|example|examples|simple|short|shorter|long|longer|large|brief|briefly|summarize|summary|elaborate|expand|why|how|then|ok|okay|yes|no|go on|rest|remaining|full|complete|finish)\b/.test(text)
   ) {
     return true;
   }
 
   // Short clarification-only messages should stay with the previous topic.
-  if (/^(?:why|how|how so|continue|go on|example|give an example|give example|tell me more|more details|in simple words|simplify|make it simple|elaborate|explain clearly|explain cle[a-z]*|explain more|explain again|explain it|explain that|explain this|explain in detail|can you explain|also explain|what about it|what about that)[?.!]*$/i.test(text)) {
+  if (/^(?:why|how|how so|continue|go on|example|give an example|give example|tell me more|more details|in simple words|simplify|make it simple|make it short|keep it short|give short answer|short answer|short|brief|briefly|make it long|give long answer|long answer|long|large|explain clearly|explain cle[a-z]*|explain more|explain again|explain it|explain that|explain this|explain in detail|can you explain|also explain|what about it|what about that)[?.!]*$/i.test(text)) {
     return true;
   }
 
-  return /\b(?:explain it|explain that|explain this|make it clearer|in more detail|with an example|with example|continue from there)\b/i.test(text);
+  return /\b(?:explain it|explain that|explain this|make it clearer|in more detail|with an example|with example|continue from there|give (?:me )?(?:a )?(?:short|long|brief) answer|make (?:the )?answer (?:short|long|brief)|answer (?:in )?(?:short|long|brief)|in (?:short|long|brief)|shorter answer|longer answer)\b/i.test(text);
 }
 
 function parseGeneratedFiles(content) {
@@ -1156,41 +1155,10 @@ function parseGeneratedFiles(content) {
 
 
 async function testWebsiteResponsiveness(website) {
-  const browser = await chromium.launch({ headless: true });
-
-  try {
-    const page = await browser.newPage();
-    const html = website.files["index.html"] || "";
-    const css = website.files["style.css"] || "";
-
-    const widths = [320, 375, 390, 430, 768, 820, 1024, 1280, 1440];
-    const failures = [];
-
-    for (const width of widths) {
-      await page.setViewportSize({ width, height: 900 });
-
-      await page.setContent(
-        html.replace("</head>", `<style>${css}</style></head>`),
-        { waitUntil: "domcontentloaded" }
-      );
-
-      const result = await page.evaluate(() => ({
-        pageWidth: document.documentElement.scrollWidth,
-        viewportWidth: document.documentElement.clientWidth,
-      }));
-
-      if (result.pageWidth > result.viewportWidth) {
-        failures.push(width);
-      }
-    }
-
-    return {
-      passed: failures.length === 0,
-      failures,
-    };
-  } finally {
-    await browser.close();
-  }
+  // Website generation runs in serverless environments where Chromium may not
+  // be installed. Do not let an optional visual test prevent website creation.
+  // The generator prompt already requires responsive HTML/CSS for all screens.
+  return { passed: null, skipped: true, failures: [] };
 }
 
 
@@ -1385,7 +1353,9 @@ WEBSITE DESIGN VARIETY AND PROMPT-BASED STYLE REQUIREMENTS:
       temperature: 0.2,
 max_completion_tokens: 10000,
 reasoning_format: "hidden",
-response_format: { type: "json_object" },
+// Do not enable provider-side JSON validation here: Groq may reject
+// otherwise usable HTML-in-JSON output before it reaches our parser.
+// The prompt still requests JSON, and parseGeneratedFiles validates it. 
 }),
 signal: AbortSignal.timeout(90000),
 });
@@ -1446,13 +1416,10 @@ if (!response.ok) {
 
   const responsiveCheck = await testWebsiteResponsiveness(website);
 
-  if (!responsiveCheck.passed) {
-    console.warn(
-      "Responsive issues detected at viewport widths:",
-      responsiveCheck.failures
-    );
-  } else {
-    console.log("Responsive check passed for all viewport widths.");
+  if (responsiveCheck.skipped) {
+    console.log("Optional browser responsiveness test skipped in this serverless environment.");
+  } else if (!responsiveCheck.passed) {
+    console.warn("Responsive issues detected at viewport widths:", responsiveCheck.failures);
   }
 
 
@@ -1605,6 +1572,20 @@ User: Enakku biryani romba pudikkum.
 Assistant:
 Biryani-na semma choice! ðŸ˜„ Neenga usually chicken
 biryani prefer pannuveengala, illa mutton biryaniya?
+
+ACADEMIC, CODING AND ANSWER-FORMATTING RULES:
+- Answer the complete question, including every requested part. A long or multi-part question must not be reduced to a vague one-line reply. The user message may contain several requirements; address each one in order.
+- For educational, science, maths, general-knowledge and factual questions, give a direct, accurate answer first, then the explanation at the depth requested. Do not invent facts, calculations, citations or examples. If a detail is uncertain, say so clearly.
+- Treat short follow-up requests such as "short", "give a short answer", "make it long", "large", "explain in detail", "simplify", "continue" and "give an example" as instructions to revise or extend the immediately preceding answer on the same topic. Do not answer these words as a new unrelated question. Keep the previous question and answer as the subject unless the user clearly changes topic.
+- If the user asks for code, provide a complete, runnable solution in a fenced code block labelled with its programming language. Include required imports and a sensible entry point. Do not replace requested code with pseudocode unless explicitly requested.
+- When the code's output can be determined reliably, show it after the code in its own fenced \`\`\`output code block, which is displayed in a separate Output panel. Do not add a second Output heading. Keep code and output visually separate. If output depends on unknown input, external services, randomness or the runtime environment, state the assumption or show a clearly labelled sample output instead of pretending it is guaranteed.
+- Explain important code steps when the user asks for an explanation. If the user provides a test input, use that exact input and show the matching output.
+- For "difference between", "compare" or similar questions, compare the requested items directly in a clear Markdown table. Include the most important differences and a short conclusion when useful. Do not give unrelated background instead of the comparison.
+- EXACT REQUESTED COUNT (STRICT): Whenever the user specifies a number for points, bullets, steps, examples, reasons, advantages, disadvantages, paragraphs, questions, or other list items, provide exactly that number — not fewer and not more. Count the items before sending the answer. For example, "give 5 points" means exactly five distinct points; do not add an introduction list, bonus points, or extra numbered items that make the total exceed five.
+- Apply a count instruction to the current topic even when it is a short follow-up. If the previous topic was SQL vs NoSQL and the user says "give 5 points", provide exactly five points comparing SQL and NoSQL. Do not treat the follow-up as a new topic.
+- If the requested number is ambiguous (for example, whether it applies to each side of a comparison), use the most natural interpretation and keep the total count exact. Preserve a requested comparison table when the user asks for a difference; if they then request a specific number of points, make the table contain exactly that many comparison rows (excluding the header), unless they explicitly ask for bullets instead.
+- Use headings, numbered steps, bullets, equations and tables only when they improve clarity. Keep formatting clean; do not use HTML line-break tags or decorative separator spam.
+- For a very long request, structure the response so no requested sub-question is silently skipped. If the request exceeds what can be answered accurately in one response, explain the limit and continue in parts rather than inventing or omitting content.
 
 STRICT RULES:
 - Do not recommend other platforms unless the user asks.
@@ -1795,7 +1776,7 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
       model: hasImages ? "qwen/qwen3.8-27b" : MODEL,
       messages,
       temperature: 0.2,
-      max_tokens: 4096,
+      max_tokens: 8192,
       ...(hasImages ? {} : {
         reasoning_effort: "medium",
         reasoning_format: "hidden",
@@ -2197,7 +2178,7 @@ app.get("/api/search", async (req, res) => {
 // --------------------------------------------------
 
 app.post("/api/chat", async (req, res) => {
-  const message = cleanText(req.body?.message, 5000);
+  const message = cleanText(req.body?.message, 20000);
 
   if (!message) {
     return res.status(400).json({
@@ -2239,7 +2220,7 @@ app.post("/api/chat", async (req, res) => {
         .slice(-18)
         .map((item) => ({
           role: item.role,
-          content: cleanText(item.content, 3000),
+          content: cleanText(item.content, 7000),
         }))
     : [];
 

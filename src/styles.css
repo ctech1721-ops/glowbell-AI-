@@ -2992,3 +2992,26 @@ html, body, #root { background:#020306; }
 }
 .gb-notes-search input { width:100%; min-width:0; color:#edf8ff; background:transparent; border:0; outline:0; font-size:12px; }
 .gb-notes-search input::placeholder { color:#71889b; }
+
+
+/* Separate runtime/sample output from source-code blocks. */
+.gb-output-block {
+  margin: 12px 0 16px;
+  overflow: hidden;
+  border: 1px solid rgba(105, 200, 255, .28);
+  border-radius: 12px;
+  background: rgba(8, 19, 32, .92);
+}
+.gb-output-toolbar {
+  display: flex; align-items: center; min-height: 34px; padding: 0 13px;
+  color: #9bdcff; background: rgba(55, 145, 195, .12);
+  border-bottom: 1px solid rgba(105, 200, 255, .18);
+  font-size: 12px; font-weight: 800; letter-spacing: .04em;
+}
+.gb-output-block pre {
+  margin: 0; padding: 14px 16px; overflow-x: auto;
+  color: #dceeff; background: transparent;
+  font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.gb-output-block code { color: inherit; font: inherit; }
