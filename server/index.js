@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+﻿import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import { createRequire } from "node:module";
@@ -66,11 +66,21 @@ const supabaseAdmin = createClient(
 
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY?.trim();
 const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim();
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN?.trim();
 
 const TAVILY_URL = "https://api.tavily.com/search";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
+const CLOUDFLARE_AI_MODEL = process.env.CLOUDFLARE_AI_MODEL?.trim() || "@cf/zai-org/glm-4.7-flash";
+const GROQ_MODEL = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
+const CHAT_MAX_OUTPUT_TOKENS = Math.min(
+  4096,
+  Math.max(512, Number.parseInt(process.env.CHAT_MAX_OUTPUT_TOKENS || "2048", 10) || 2048)
+);
 
-const MODEL = "openai/gpt-oss-120b";
+const MODEL = GROQ_MODEL;
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 
@@ -163,6 +173,202 @@ function isOfficialDomain(url) {
 }
 
 // --------------------------------------------------
+// MULTI-PROVIDER AI ROUTER (API KEYS ONLY; NO LOCAL DATASET)
+// Groq is primary. Gemini is the free-tier fallback when configured.
+// --------------------------------------------------
+
+function getProviderErrorMessage(provider, status, body) {
+  let detail = String(body || "").slice(0, 900);
+  try {
+    const parsed = JSON.parse(body);
+    detail = parsed?.error?.message || parsed?.error?.status || parsed?.message || detail;
+  } catch {}
+  return `${provider} returned HTTP ${status}: ${detail}`;
+}
+
+function getGeminiParts(content) {
+  if (typeof content === "string") return [{ text: content }];
+  if (!Array.isArray(content)) return [{ text: String(content ?? "") }];
+  const parts = [];
+  for (const item of content) {
+    if (item?.type === "text" && item.text) {
+      parts.push({ text: item.text });
+      continue;
+    }
+    const imageUrl = item?.image_url?.url;
+    if (item?.type === "image_url" && typeof imageUrl === "string") {
+      const match = imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+      if (match) {
+        parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+      }
+    }
+  }
+  return parts.length ? parts : [{ text: "" }];
+}
+
+function toGeminiRequest(messages, options = {}) {
+  const systemMessages = messages.filter((item) => item.role === "system");
+  const chatMessages = messages.filter((item) => item.role !== "system");
+  const systemText = systemMessages
+    .map((item) => typeof item.content === "string" ? item.content : getGeminiParts(item.content).map((part) => part.text || "").join("\n"))
+    .filter(Boolean)
+    .join("\n\n");
+
+  const contents = chatMessages.map((item) => ({
+    role: item.role === "assistant" ? "model" : "user",
+    parts: getGeminiParts(item.content),
+  }));
+
+  const generationConfig = {
+    temperature: options.temperature ?? 0.2,
+    maxOutputTokens: options.maxTokens ?? CHAT_MAX_OUTPUT_TOKENS,
+  };
+  if (options.jsonMode) generationConfig.responseMimeType = "application/json";
+
+  return {
+    ...(systemText ? { systemInstruction: { parts: [{ text: systemText }] } } : {}),
+    contents,
+    generationConfig,
+  };
+}
+
+async function requestFromGroq(messages, options = {}) {
+  const firstUser = messages.find((item) => item.role === "user");
+  const hasImages = Boolean(options.hasImages) || (Array.isArray(firstUser?.content) && firstUser.content.some((part) => part?.type === "image_url"));
+  const response = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: hasImages ? "qwen/qwen3.8-27b" : (options.model || MODEL),
+      messages,
+      temperature: options.temperature ?? 0.2,
+      max_tokens: options.maxTokens ?? CHAT_MAX_OUTPUT_TOKENS,
+      ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
+      ...(hasImages ? {} : {
+        reasoning_effort: "medium",
+        reasoning_format: "hidden",
+      }),
+    }),
+    signal: AbortSignal.timeout(options.timeoutMs || 60000),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    const error = new Error(getProviderErrorMessage("Groq", response.status, raw));
+    error.status = response.status;
+    error.provider = "Groq";
+    throw error;
+  }
+  let data;
+  try { data = JSON.parse(raw); } catch { throw new Error("Groq returned invalid JSON."); }
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) throw new Error("Groq returned an empty answer.");
+  return content.trim();
+}
+
+async function requestFromGemini(messages, options = {}) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": GEMINI_API_KEY,
+    },
+    body: JSON.stringify(toGeminiRequest(messages, options)),
+    signal: AbortSignal.timeout(options.timeoutMs || 60000),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    const error = new Error(getProviderErrorMessage("Gemini", response.status, raw));
+    error.status = response.status;
+    error.provider = "Gemini";
+    throw error;
+  }
+  let data;
+  try { data = JSON.parse(raw); } catch { throw new Error("Gemini returned invalid JSON."); }
+  const content = data?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || "")
+    .join("")
+    .trim();
+  if (!content) throw new Error("Gemini returned an empty answer.");
+  return content;
+}
+
+async function requestFromCloudflare(messages, options = {}) {
+  if (options.hasImages) throw new Error("Cloudflare fallback is skipped for image questions; use Gemini for image requests.");
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(CLOUDFLARE_ACCOUNT_ID)}/ai/v1/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: CLOUDFLARE_AI_MODEL,
+      messages,
+      temperature: options.temperature ?? 0.2,
+      max_tokens: Math.min(options.maxTokens ?? CHAT_MAX_OUTPUT_TOKENS, 4096),
+    }),
+    signal: AbortSignal.timeout(options.timeoutMs || 60000),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    const error = new Error(getProviderErrorMessage("Cloudflare Workers AI", response.status, raw));
+    error.status = response.status;
+    error.provider = "Cloudflare Workers AI";
+    throw error;
+  }
+  let data;
+  try { data = JSON.parse(raw); } catch { throw new Error("Cloudflare Workers AI returned invalid JSON."); }
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) throw new Error("Cloudflare Workers AI returned an empty answer.");
+  return content.trim();
+}
+
+async function callAI(messages, options = {}) {
+  const providers = [];
+  if (GROQ_API_KEY) providers.push({ name: "Groq", run: () => requestFromGroq(messages, options) });
+  if (GEMINI_API_KEY) providers.push({ name: "Gemini", run: () => requestFromGemini(messages, options) });
+  if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN && !options.hasImages) {
+    providers.push({ name: "Cloudflare Workers AI", run: () => requestFromCloudflare(messages, options) });
+  }
+
+  if (!providers.length) {
+    throw new Error("No AI provider is configured. Add Groq, Gemini, or Cloudflare Workers AI server credentials.");
+  }
+
+  const failures = [];
+  for (const provider of providers) {
+    try {
+      const content = await provider.run();
+      console.info(`[AI Router] ${provider.name} answered successfully.`);
+      return { content, provider: provider.name };
+    } catch (error) {
+      failures.push(error);
+      console.warn(`[AI Router] ${provider.name} failed:`, error.message);
+      // Move to the next configured provider for quota, temporary, model,
+      // authentication or provider-side errors. A malformed user request
+      // (HTTP 400) is returned instead of repeating it against another API.
+      if (error.status === 400 || error.status === 413 || error.status === 422) break;
+    }
+  }
+
+  const last = failures[failures.length - 1];
+  if (failures.length > 1 && failures.every((error) => error.status === 429 || error.status >= 500 || !error.status)) {
+    const unavailable = new Error("All configured free AI providers are currently busy or rate-limited. Please wait a little and try again.");
+    unavailable.status = 503;
+    unavailable.code = "AI_PROVIDERS_UNAVAILABLE";
+    throw unavailable;
+  }
+  const finalError = new Error(last?.message || "All configured AI providers failed. Check the server API keys and provider status.");
+  finalError.status = last?.status === 401 || last?.status === 403 ? 503 : (last?.status || 503);
+  finalError.code = "AI_PROVIDER_FAILURE";
+  throw finalError;
+}
+
+// --------------------------------------------------
 // EXCEL REQUEST DETECTION
 // Spreadsheet requests are routed to structured AI generation before normal chat.
 // --------------------------------------------------
@@ -201,7 +407,6 @@ function sanitizePreviousExcel(value) {
 }
 
 async function generateExcelData(message, previous = null) {
-  if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured.");
 
   const previousInfo = previous
     ? [
@@ -214,44 +419,27 @@ async function generateExcelData(message, previous = null) {
       ].join(" ")
     : "";
 
-  const response = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
+  const aiResult = await callAI([
+    {
+      role: "system",
+      content: [
+        "Create spreadsheet data for the user's request.",
+        "Return ONLY valid JSON with this shape:",
+        '{"mode":"replace","fileName":"short-name","headers":["Column 1"],"rows":[["value"]],"answer":"one short friendly sentence"}',
+        "Use a realistic, sensible dataset when the user asks for a dataset.",
+        "If the user does not say how many rows, create 30 rows. If they give a number, follow it (maximum 200 rows per answer).",
+        "Keep headers and every row the same length.",
+        "Use numbers as JSON numbers, not formatted strings. Write dates as YYYY-MM-DD text.",
+        "Maximum 30 columns.",
+        "Do not include markdown fences or any text outside the JSON.",
+        previousInfo,
+      ].join(" "),
     },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.3,
-      max_tokens: 7000,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: [
-            "Create spreadsheet data for the user's request.",
-            "Return ONLY valid JSON with this shape:",
-            '{"mode":"replace","fileName":"short-name","headers":["Column 1"],"rows":[["value"]],"answer":"one short friendly sentence"}',
-            "Use a realistic, sensible dataset when the user asks for a dataset.",
-            "If the user does not say how many rows, create 30 rows. If they give a number, follow it (maximum 200 rows per answer).",
-            "Keep headers and every row the same length.",
-            "Use numbers as JSON numbers, not formatted strings. Write dates as YYYY-MM-DD text.",
-            "Maximum 30 columns.",
-            "Do not include markdown fences or any text outside the JSON.",
-            previousInfo,
-          ].join(" "),
-        },
-        { role: "user", content: message },
-      ],
-    }),
-    signal: AbortSignal.timeout(90000),
-  });
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`Excel data generation failed (${response.status}): ${raw.slice(0, 500)}`);
+    { role: "user", content: message },
+  ], { temperature: 0.3, maxTokens: 7000, jsonMode: true, timeoutMs: 90000 });
   let parsed;
   try {
-    const payload = JSON.parse(raw);
-    parsed = JSON.parse(payload.choices?.[0]?.message?.content || "{}");
+    parsed = JSON.parse(aiResult.content);
   } catch {
     throw new Error("The AI returned invalid spreadsheet data. Please try a simpler dataset request.");
   }
@@ -556,7 +744,7 @@ function isMathQuestion(message) {
   const text = String(message || "");
   if (/\b(solve|calculate|calculation|compute|evaluate|simplify|factori[sz]e|differentiate|integrate|derivative|integral|equation|percentage|percent|probability|average|mean|median|ratio|area of|volume of|perimeter|hypotenuse|sin|cos|tan|log|sqrt|square root|cube root|lcm|hcf|gcd|profit|loss|interest|speed|distance|matrix|determinant|quadratic|simultaneous|find the value|find x)\b/i.test(text)) return true;
   // Plain arithmetic such as "25 * 4 + 10", "12/4", "2^5", "(3+4)x5"
-  if (/\d\s*[-+*/^xÃ—Ã·%]\s*\(?\d/.test(text)) return true;
+  if (/\d\s*[-+*/^xÃƒâ€”ÃƒÂ·%]\s*\(?\d/.test(text)) return true;
   return false;
 }
 
@@ -565,11 +753,11 @@ function isMathQuestion(message) {
 // --------------------------------------------------
 
 function isIndiaCapitalQuestion(message) {
-  return /\b(capital of india|india['â€™]s capital|indian capital|what is the capital of india)\b/i.test(message);
+  return /\b(capital of india|india['Ã¢â‚¬â„¢]s capital|indian capital|what is the capital of india)\b/i.test(message);
 }
 
 function isFranceCapitalQuestion(message) {
-  return /\b(capital of france|france['â€™]s capital|what is the capital of france)\b/i.test(message);
+  return /\b(capital of france|france['Ã¢â‚¬â„¢]s capital|what is the capital of france)\b/i.test(message);
 }
 
 function isAustraliaPMQuestion(message) {
@@ -796,7 +984,7 @@ async function tavilySearch(query, options = {}) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
@@ -905,9 +1093,9 @@ function getGuidedBuildReply(message) {
   if (/\b(using|with|for|in (html|react|python|java|flutter|node|php)|html|css|react|vue|angular|django|flask|php|flutter|kotlin|swift|about|called|named)\b/.test(text)) return null;
 
   if (/\b(website|web site|webpage|web page|site)\b/.test(text)) {
-    return `Great! ðŸ‘ Let's build your own professional website step by step â€” design, code, running it on your computer, and publishing it online.
+    return `Great! Ã°Å¸â€˜Â Let's build your own professional website step by step Ã¢â‚¬â€ design, code, running it on your computer, and publishing it online.
 
-### Step 1 â€“ Tell me about your website
+### Step 1 Ã¢â‚¬â€œ Tell me about your website
 
 **1. What type of website?**
 - Business website
@@ -932,27 +1120,27 @@ function getGuidedBuildReply(message) {
 - Login / Sign-up
 - Online payments
 - Admin dashboard
-- Not sure â€” suggest for me
+- Not sure Ã¢â‚¬â€ suggest for me
 
 You can answer in one line, for example:
 \`Portfolio, name: Chandru, dark theme, Home / About / Projects / Contact\`
 
-Once you answer, I'll give you **one command or file at a time**, check the result with you, and help fix any error before we move on. ðŸš€`;
+Once you answer, I'll give you **one command or file at a time**, check the result with you, and help fix any error before we move on. Ã°Å¸Å¡â‚¬`;
   }
 
   if (/\b(app|application|android|ios|mobile)\b/.test(text)) {
-    return `Great! ðŸ‘ Let's plan and build your app step by step.
+    return `Great! Ã°Å¸â€˜Â Let's plan and build your app step by step.
 
-### Step 1 â€“ Tell me about your app
+### Step 1 Ã¢â‚¬â€œ Tell me about your app
 
 **1. What kind of app?**
 - Android only
 - iPhone (iOS) only
 - Both Android and iPhone
 - Web app (works in the browser)
-- Not sure â€” help me decide
+- Not sure Ã¢â‚¬â€ help me decide
 
-**2. What should the app do?** (one or two lines â€” for example: *"order food from nearby shops"*)
+**2. What should the app do?** (one or two lines Ã¢â‚¬â€ for example: *"order food from nearby shops"*)
 
 **3. App name** (or say *"not sure"*)
 
@@ -970,13 +1158,13 @@ Once you answer, I'll give you **one command or file at a time**, check the resu
 - Know some coding
 - Experienced developer
 
-Answer whatever you know â€” for anything you're unsure about, just say *"not sure"* and I'll recommend the best option. Then I'll take you through it **one small, verified step at a time**. ðŸš€`;
+Answer whatever you know Ã¢â‚¬â€ for anything you're unsure about, just say *"not sure"* and I'll recommend the best option. Then I'll take you through it **one small, verified step at a time**. Ã°Å¸Å¡â‚¬`;
   }
 
   if (/\b(game)\b/.test(text)) {
-    return `Great! ðŸŽ® Let's build your game step by step.
+    return `Great! Ã°Å¸Å½Â® Let's build your game step by step.
 
-### Step 1 â€“ Tell me about your game
+### Step 1 Ã¢â‚¬â€œ Tell me about your game
 
 **1. Where should it run?**
 - Web browser
@@ -988,7 +1176,7 @@ Answer whatever you know â€” for anything you're unsure about, just say *"n
 - Arcade (jump, run, shoot)
 - Racing
 - Card / board game
-- Not sure â€” suggest one
+- Not sure Ã¢â‚¬â€ suggest one
 
 **3. 2D or 3D?**
 
@@ -996,7 +1184,7 @@ Answer whatever you know â€” for anything you're unsure about, just say *"n
 - Complete beginner
 - Know some coding
 
-Reply in one line, for example: \`Web browser, arcade, 2D, beginner\`. I'll then guide you with one small step at a time. ðŸš€`;
+Reply in one line, for example: \`Web browser, arcade, 2D, beginner\`. I'll then guide you with one small step at a time. Ã°Å¸Å¡â‚¬`;
   }
 
   return null;
@@ -1008,7 +1196,7 @@ function getCasualGreetingReply(message, history = []) {
   // Handle standalone chat greetings before web search/model prompting. This
   // prevents slang greetings ("hyy", "hyyy") from being treated as vocabulary
   // questions, even when the user repeats them in the same conversation.
-  const greeting = /^(?:h+i+|h+e+y+|h+y+|hello+|good\s+morning|good\s+afternoon|good\s+evening)[.!?,\sâ¤ï¸ðŸ˜ŠðŸ‘‹]*$/iu;
+  const greeting = /^(?:h+i+|h+e+y+|h+y+|hello+|good\s+morning|good\s+afternoon|good\s+evening)[.!?,\sÃ¢ÂÂ¤Ã¯Â¸ÂÃ°Å¸ËœÅ Ã°Å¸â€˜â€¹]*$/iu;
   if (!greeting.test(text)) return null;
 
   const previousGreetingCount = history.filter((item) =>
@@ -1163,9 +1351,6 @@ async function testWebsiteResponsiveness(website) {
 
 
 async function generateWebsiteFiles(prompt) {
-  if (!GROQ_API_KEY) {
-    throw new Error("GROQ_API_KEY is not configured.");
-  }
 
   const system = `
 You are an expert frontend website developer.
@@ -1332,81 +1517,12 @@ WEBSITE DESIGN VARIETY AND PROMPT-BASED STYLE REQUIREMENTS:
 12. Implement the chosen design directly in index.html, style.css and script.js.
 `;
 
-  const response = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content: system,
-        },
-        {
-          role: "user",
-          content: `Create this website: ${prompt}`,
-        },
-      ],
-      temperature: 0.2,
-max_completion_tokens: 10000,
-reasoning_format: "hidden",
-// Do not enable provider-side JSON validation here: Groq may reject
-// otherwise usable HTML-in-JSON output before it reaches our parser.
-// The prompt still requests JSON, and parseGeneratedFiles validates it. 
-}),
-signal: AbortSignal.timeout(90000),
-});
+  const aiResult = await callAI([
+    { role: "system", content: system },
+    { role: "user", content: `Create this website: ${prompt}` },
+  ], { temperature: 0.2, maxTokens: 10000, timeoutMs: 90000 });
 
-
-if (!response.ok) {
-  const details = await response.text();
-
-  console.error("Website AI error:", response.status, details);
-
-  if (response.status === 429) {
-    let retryMinutes = 60;
-
-    try {
-      const errorData = JSON.parse(details);
-      const message = errorData?.error?.message || "";
-
-      const match = message.match(/try again in ([\d.]+)\s*(s|sec|seconds|m|min|minutes|h|hours)/i);
-
-      if (match) {
-        const amount = Number(match[1]);
-        const unit = match[2].toLowerCase();
-
-        retryMinutes = Math.max(
-          1,
-          Math.ceil(
-            unit.startsWith("h") ? amount * 60 :
-            unit.startsWith("m") ? amount :
-            amount / 60
-          )
-        );
-      }
-    } catch (error) {
-      console.warn("Could not read AI retry time.");
-    }
-
-    throw new Error(
-      `Your AI generation limit has been reached. Please try again in about ${retryMinutes} minutes.`
-    );
-  }
-
-  throw new Error(
-    `Website AI service returned status ${response.status}: ${details.slice(0, 500)}`
-  );
-}
-
-
-  const data = await response.json();
-
-  const content = data?.choices?.[0]?.message?.content;
-
+  const content = aiResult.content;
   if (!content || typeof content !== "string") {
     throw new Error("Website AI returned an empty response.");
   }
@@ -1446,7 +1562,7 @@ function buildSystemPrompt({
   }).format(new Date());
 
   return `
-You are Global AI â€” a capable, thoughtful, friendly AI assistant. Understand what the user actually needs and give the most useful answer, not a generic template.
+You are Global AI Ã¢â‚¬â€ a capable, thoughtful, friendly AI assistant. Understand what the user actually needs and give the most useful answer, not a generic template.
 
 Today's date is ${today} in the Asia/Kolkata timezone.
 CONVERSATION QUALITY ENGINE:
@@ -1523,7 +1639,7 @@ Respond to what the user actually says, not like a scripted chatbot.
 - Do not repeatedly mention that you are an AI when irrelevant.
 
 8. RESPONSE LENGTH
-- Simple casual messages: usually 1â€“3 sentences.
+- Simple casual messages: usually 1Ã¢â‚¬â€œ3 sentences.
 - Emotional messages: respond thoughtfully without over-explaining.
 - Questions requiring explanations: provide enough detail.
 - Detailed requests: organize the answer clearly.
@@ -1552,7 +1668,7 @@ EXAMPLES:
 User: Edhachi pesalam.
 
 Assistant:
-Pesalam! ðŸ˜„ Oru fun question: oru naal time travel panna
+Pesalam! Ã°Å¸Ëœâ€ž Oru fun question: oru naal time travel panna
 chance kidaicha, past-ku povingala illa future-ku povingala?
 
 User: Bore adikuthu.
@@ -1570,7 +1686,7 @@ Naan kekkuren; udane advice kudukka rush panna maatten.
 User: Enakku biryani romba pudikkum.
 
 Assistant:
-Biryani-na semma choice! ðŸ˜„ Neenga usually chicken
+Biryani-na semma choice! Ã°Å¸Ëœâ€ž Neenga usually chicken
 biryani prefer pannuveengala, illa mutton biryaniya?
 
 ACADEMIC, CODING AND ANSWER-FORMATTING RULES:
@@ -1581,7 +1697,7 @@ ACADEMIC, CODING AND ANSWER-FORMATTING RULES:
 - When the code's output can be determined reliably, show it after the code in its own fenced \`\`\`output code block, which is displayed in a separate Output panel. Do not add a second Output heading. Keep code and output visually separate. If output depends on unknown input, external services, randomness or the runtime environment, state the assumption or show a clearly labelled sample output instead of pretending it is guaranteed.
 - Explain important code steps when the user asks for an explanation. If the user provides a test input, use that exact input and show the matching output.
 - For "difference between", "compare" or similar questions, compare the requested items directly in a clear Markdown table. Include the most important differences and a short conclusion when useful. Do not give unrelated background instead of the comparison.
-- EXACT REQUESTED COUNT (STRICT): Whenever the user specifies a number for points, bullets, steps, examples, reasons, advantages, disadvantages, paragraphs, questions, or other list items, provide exactly that number — not fewer and not more. Count the items before sending the answer. For example, "give 5 points" means exactly five distinct points; do not add an introduction list, bonus points, or extra numbered items that make the total exceed five.
+- EXACT REQUESTED COUNT (STRICT): Whenever the user specifies a number for points, bullets, steps, examples, reasons, advantages, disadvantages, paragraphs, questions, or other list items, provide exactly that number â€” not fewer and not more. Count the items before sending the answer. For example, "give 5 points" means exactly five distinct points; do not add an introduction list, bonus points, or extra numbered items that make the total exceed five.
 - Apply a count instruction to the current topic even when it is a short follow-up. If the previous topic was SQL vs NoSQL and the user says "give 5 points", provide exactly five points comparing SQL and NoSQL. Do not treat the follow-up as a new topic.
 - If the requested number is ambiguous (for example, whether it applies to each side of a comparison), use the most natural interpretation and keep the total count exact. Preserve a requested comparison table when the user asks for a difference; if they then request a specific number of points, make the table contain exactly that many comparison rows (excluding the header), unless they explicitly ask for bullets instead.
 - Use headings, numbered steps, bullets, equations and tables only when they improve clarity. Keep formatting clean; do not use HTML line-break tags or decorative separator spam.
@@ -1632,7 +1748,7 @@ hobby or personal interest without asking for advice:
   tips, roadmaps or informational lists.
 - Do NOT assume the user wants to learn more.
 - First respond directly to what they shared.
-- Keep the response to 1â€“2 short sentences.
+- Keep the response to 1Ã¢â‚¬â€œ2 short sentences.
 - Ask one natural follow-up question about their interest.
 - Only provide detailed information when explicitly requested.
 
@@ -1711,10 +1827,8 @@ async function askGroq({
   mathQuestion = false,
 }) {
   const hasImages = imageDataUrls.length > 0;
-  if (!GROQ_API_KEY) {
-    throw new Error(
-      "GROQ_API_KEY is missing from Vercel environment variables."
-    );
+  if (!GROQ_API_KEY && !GEMINI_API_KEY && !(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN)) {
+    throw new Error("Configure at least one AI provider: Groq, Gemini, or Cloudflare Workers AI.");
   }
 
   const userContent = [
@@ -1763,48 +1877,15 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
     },
   ];
 
-  const response = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      // GPT-OSS 120B is text-only. Use Groq's current vision-capable
-      // Qwen model whenever an image is attached, while keeping the existing
-      // text model and settings for ordinary chat requests.
-      model: hasImages ? "qwen/qwen3.8-27b" : MODEL,
-      messages,
-      temperature: 0.2,
-      max_tokens: 8192,
-      ...(hasImages ? {} : {
-        reasoning_effort: "medium",
-        reasoning_format: "hidden",
-      }),
-    }),
-    signal: AbortSignal.timeout(60000),
+  const aiResult = await callAI(messages, {
+    temperature: 0.2,
+    maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+    timeoutMs: 30000,
+    hasImages,
   });
 
-  if (!response.ok) {
-    const details = await response.text();
-    console.error("Groq error:", response.status, details);
-    if (response.status === 401) {
-      throw new Error("Groq authentication failed. Check the GROQ_API_KEY in your environment.");
-    }
-    if (response.status === 429) {
-      throw new Error("Groq rate limit reached. Please wait a moment and try again.");
-    }
-    throw new Error(`AI service returned status ${response.status}: ${details.slice(0, 500)}`);
-  }
+  return aiResult.content;
 
-  const data = await response.json();
-  const answer = data?.choices?.[0]?.message?.content;
-
-  if (typeof answer !== "string" || !answer.trim()) {
-    throw new Error("AI service returned an empty answer.");
-  }
-
-  return answer.trim();
 }
 
 // --------------------------------------------------
@@ -2000,27 +2081,26 @@ app.post("/api/usage/heartbeat", async (req, res) => {
     const userId = data.user.id;
     const now = Date.now();
     const previous = lastBeatAt.get(userId) || 0;
-    // Ignore floods: at most one report every ~20 seconds per user.
+    // Best-effort per-process flood protection. The database RPC performs
+    // the actual atomic increment so concurrent requests cannot overwrite time.
     if (now - previous < 20000) return res.json({ ok: true, skipped: true });
-    lastBeatAt.set(userId, now);
-    if (lastBeatAt.size > 5000) lastBeatAt.clear();
 
     const seconds = Math.min(60, Math.max(1, Math.round(Number(req.body?.seconds) || 30)));
-
-    const { error: heartbeatError } = await supabaseAdmin
-      .from("user_usage_daily")
-      .upsert(
-        {
-          user_id: userId,
-          usage_date: usageDateString(),
-          seconds: 0,
-          last_seen: new Date().toISOString(),
-        },
-        { onConflict: "user_id,usage_date" }
-      );
+    const { error: heartbeatError } = await supabaseAdmin.rpc("add_usage_seconds", {
+      p_user_id: userId,
+      p_date: usageDateString(),
+      p_seconds: seconds,
+    });
     if (heartbeatError) throw heartbeatError;
 
-    return res.json({ ok: true });
+    lastBeatAt.set(userId, now);
+    if (lastBeatAt.size > 5000) {
+      for (const [trackedUserId, timestamp] of lastBeatAt) {
+        if (now - timestamp > 120000) lastBeatAt.delete(trackedUserId);
+      }
+    }
+
+    return res.json({ ok: true, seconds });
   } catch (error) {
     console.error("Usage heartbeat error:", error?.message || error);
     return res.status(500).json({ error: "Could not record usage." });
@@ -2139,7 +2219,12 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     service: "Global AI",
     searchConfigured: Boolean(TAVILY_API_KEY),
-    aiConfigured: Boolean(GROQ_API_KEY),
+    aiConfigured: Boolean(GROQ_API_KEY || GEMINI_API_KEY || (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN)),
+    aiProviders: {
+      groq: Boolean(GROQ_API_KEY),
+      gemini: Boolean(GEMINI_API_KEY),
+      cloudflare: Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN),
+    },
   });
 });
 
@@ -2186,46 +2271,74 @@ app.post("/api/chat", async (req, res) => {
     });
   }
 
-  const incomingHistory = Array.isArray(req.body?.history)
-    ? req.body.history.filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-18)
-    : [];
-  const greetingReply = getCasualGreetingReply(message, incomingHistory);
-  if (greetingReply) return res.json({ answer: greetingReply });
-
-  if (!req.body?.skipSearch) {
-    const guidedReply = getGuidedBuildReply(message);
-    if (guidedReply) return res.json({ answer: guidedReply });
-  }
-
-  // Generate real .xlsx files for spreadsheet requests.
-  const previousExcel = sanitizePreviousExcel(req.body?.previousExcel);
-  if (!req.body?.skipSearch && isExcelRequest(message, Boolean(previousExcel))) {
-    try {
-      const excelData = await generateExcelData(message, previousExcel);
-      return res.json({ answer: excelData.answer, excelData });
-    } catch (error) {
-      console.error("Excel generation error:", error);
-      return res.status(500).json({ error: error.message || "Could not generate the Excel file." });
+  const history = [];
+  if (Array.isArray(req.body?.history)) {
+    let remainingHistoryChars = 5000;
+    const recentHistory = req.body.history
+      .filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string")
+      .slice(-6);
+    for (const item of recentHistory) {
+      if (remainingHistoryChars <= 0) break;
+      const content = cleanText(item.content, Math.min(1400, remainingHistoryChars));
+      if (!content) continue;
+      history.push({ role: item.role, content });
+      remainingHistoryChars -= content.length;
     }
   }
 
-  const history = Array.isArray(req.body?.history)
-    ? req.body.history
-        .filter(
-          (item) =>
-            item &&
-            ["user", "assistant"].includes(item.role) &&
-            typeof item.content === "string"
-        )
-        .slice(-18)
-        .map((item) => ({
-          role: item.role,
-          content: cleanText(item.content, 7000),
-        }))
-    : [];
-
   try {
-    const processedAttachment = await processAttachments(req.body);
+    const requestId = cleanText(req.get("Idempotency-Key") || req.body?.requestId || crypto.randomUUID(), 200);
+    const payload = { ...req.body, message, history };
+    const payloadHash = crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    const { error: enqueueError } = await supabaseAdmin.rpc("enqueue_chat_task", {
+      p_request_id: requestId, p_payload_hash: payloadHash, p_payload: payload, p_max_retries: 3,
+    });
+    if (enqueueError) {
+      const conflict = String(enqueueError.message || "").includes("IDEMPOTENCY_KEY_REUSED");
+      return res.status(conflict ? 409 : 503).json({ error: conflict ? "This request ID was already used for a different message." : "Chat queue is unavailable. Apply supabase/chat_queue_setup.sql and retry.", retryable: !conflict });
+    }
+    const deadline = Date.now() + Number(process.env.CHAT_REQUEST_WAIT_MS || 115000);
+    while (Date.now() < deadline) {
+      const { data: current, error: readError } = await supabaseAdmin.from("chat_tasks").select("status,result,last_error").eq("request_id", requestId).maybeSingle();
+      if (readError) throw readError;
+      if (current?.status === "completed") return res.json(current.result || { answer: "" });
+      if (current?.status === "failed") return res.status(503).json({ error: current.last_error || "AI task failed after retries.", retryable: false });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    return res.status(202).json({ requestId, status: "processing", message: "Your request is still processing. Retry with the same Idempotency-Key to retrieve its result." });
+  } catch (error) {
+    console.error("Chat queue route error:", error);
+    return res.status(503).json({ error: "Chat queue is temporarily unavailable.", retryable: true });
+  }
+});
+
+
+export async function processQueuedChatPayload(payload) {
+  const message = cleanText(payload?.message, 20000);
+  if (!message) throw Object.assign(new Error("Please enter a message."), { status: 400 });
+  const incomingHistory = Array.isArray(payload?.history) ? payload.history.filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-18) : [];
+  const greetingReply = getCasualGreetingReply(message, incomingHistory);
+  if (greetingReply) return { answer: greetingReply };
+  if (!payload?.skipSearch) {
+    const guidedReply = getGuidedBuildReply(message);
+    if (guidedReply) return { answer: guidedReply };
+  }
+  const previousExcel = sanitizePreviousExcel(payload?.previousExcel);
+  if (!payload?.skipSearch && isExcelRequest(message, Boolean(previousExcel))) {
+    const excelData = await generateExcelData(message, previousExcel);
+    return { answer: excelData.answer, excelData };
+  }
+  const history = [];
+  if (Array.isArray(payload?.history)) {
+    let remainingHistoryChars = 5000;
+    for (const item of payload.history.filter((item) => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-6)) {
+      if (remainingHistoryChars <= 0) break;
+      const content = cleanText(item.content, Math.min(1400, remainingHistoryChars));
+      if (content) { history.push({ role: item.role, content }); remainingHistoryChars -= content.length; }
+    }
+  }
+  try {
+    const processedAttachment = await processAttachments(payload);
     const mathQuestion = isMathQuestion(message);
 
     let results = [];
@@ -2238,7 +2351,7 @@ app.post("/api/chat", async (req, res) => {
     // wording (for example "explain clearly") can return unrelated results.
     const skipSearchForMath = mathQuestion && !currentQuestion;
 
-    if (TAVILY_API_KEY && !contextualFollowUp && !skipSearchForMath && !req.body?.skipSearch) {
+    if (TAVILY_API_KEY && !contextualFollowUp && !skipSearchForMath && !payload?.skipSearch) {
       const searchData = await searchForQuestion(message);
 
       results = searchData.results;
@@ -2247,7 +2360,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const answer = await askGroq({
-      preferences: req.body?.preferences,
+      preferences: payload?.preferences,
       message,
       history,
       searchContext: buildSearchContext(results),
@@ -2259,13 +2372,37 @@ app.post("/api/chat", async (req, res) => {
       mathQuestion,
     });
 
-    return res.json({ answer });
+    return { answer };
   } catch (error) {
     console.error("Chat route error:", error);
 
-    return res.status(500).json({
-      error: error.message || "Global AI could not complete the request.",
-    });
+    throw error;
+  }
+}
+
+
+app.get("/api/chat/status/:requestId", async (req, res) => {
+  const requestId = cleanText(req.params.requestId, 200);
+  try {
+    const { data, error } = await supabaseAdmin.from("chat_tasks").select("status,result,last_error").eq("request_id", requestId).maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: "Chat task not found." });
+    if (data.status === "completed") return res.json(data.result || { answer: "" });
+    if (data.status === "failed") return res.status(503).json({ error: data.last_error || "AI task failed after retries.", retryable: false });
+    return res.status(202).json({ requestId, status: data.status });
+  } catch (error) {
+    console.error("Chat status lookup error:", error.message);
+    return res.status(503).json({ error: "Could not check chat task status.", retryable: true });
+  }
+});
+
+app.post("/api/internal/process-chat", async (req, res) => {
+  const expected = process.env.CHAT_WORKER_SECRET || "";
+  if (!expected || req.get("x-chat-worker-secret") !== expected) return res.status(401).json({ error: "Unauthorized worker" });
+  try { return res.json(await processQueuedChatPayload(req.body?.payload || {})); }
+  catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    return res.status(status).json({ error: error.message || "Chat processing failed", retryable: status === 429 || status >= 500 });
   }
 });
 
@@ -2352,3 +2489,6 @@ if (
     console.log(`Global AI server running at http://localhost:${PORT}`);
   });
 }
+
+
+

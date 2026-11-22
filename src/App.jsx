@@ -53,6 +53,23 @@ const SLASH_COMMANDS = [
   ["/compare", "Comparison table", "Compare the following in a table: "],
 ];
 
+async function waitForChatTask(requestId, signal) {
+  const deadline = Date.now() + 180000;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, 1000);
+      signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Request cancelled", "AbortError")); }, { once: true });
+    });
+    const response = await fetch(`/api/chat/status/${encodeURIComponent(requestId)}`, { signal });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 202) continue;
+    if (!response.ok) throw new Error(data.error || `Chat task failed: ${response.status}`);
+    return data;
+  }
+  throw new Error("Your request is taking longer than expected. Please retry using the same request ID if available.");
+}
+
 function dayLabel(ts) {
   const d = new Date(ts);
   const now = new Date();
@@ -617,13 +634,23 @@ export default function App() {
   }
 
   function getRequestHistory(sourceMessages) {
-    return sourceMessages
-      .filter((item) =>
-        ["user", "assistant"].includes(item.role) &&
-        typeof item.content === "string"
-      )
-      .slice(-18)
-      .map((item) => ({ role: item.role, content: item.content }));
+    const recent = sourceMessages.filter((item) =>
+      ["user", "assistant"].includes(item.role) &&
+      typeof item.content === "string"
+    ).slice(-6);
+
+    // Keep enough recent context for follow-up questions without resending
+    // a very large chat transcript on every API request.
+    let remainingChars = 5000;
+    const bounded = [];
+    for (const item of recent.slice().reverse()) {
+      if (remainingChars <= 0) break;
+      const content = item.content.slice(-Math.min(1400, remainingChars));
+      if (!content) continue;
+      bounded.push({ role: item.role, content });
+      remainingChars -= content.length;
+    }
+    return bounded.reverse();
   }
 
   function getRequestAttachments(list) {
@@ -704,6 +731,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         signal: (abortRef.current = new AbortController()).signal,
         body: JSON.stringify({
+          requestId: crypto.randomUUID(),
           message: finalMessage,
           attachments: getRequestAttachments(attachments),
           preferences: buildPreferences(),
@@ -722,6 +750,7 @@ export default function App() {
         throw new Error("Server returned an invalid response. Check the backend terminal.");
       }
 
+      if (response.status === 202 && data.requestId) data = await waitForChatTask(data.requestId, abortRef.current?.signal);
       if (!response.ok) {
         throw new Error(data.error || `Server error: ${response.status}`);
       }
@@ -985,6 +1014,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         signal: (abortRef.current = new AbortController()).signal,
         body: JSON.stringify({
+          requestId: crypto.randomUUID(),
           message: question,
           attachments: getRequestAttachments(attachments),
           preferences: buildPreferences(),
@@ -1001,6 +1031,7 @@ export default function App() {
         throw new Error("Server returned an invalid response.");
       }
 
+      if (response.status === 202 && data.requestId) data = await waitForChatTask(data.requestId, abortRef.current?.signal);
       if (!response.ok) throw new Error(data.error || `Server error: ${response.status}`);
       if (!data.answer) throw new Error("The AI returned an empty answer.");
 
@@ -1264,6 +1295,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          requestId: crypto.randomUUID(),
           message: "Make short notes from the text below. Use very simple words. Maximum 6 bullet points, each one short line. Add a one-line title first. Text:\n" +
             removeAnswerSources(answer.content).slice(0, 2800),
           skipSearch: true,
@@ -1271,7 +1303,8 @@ export default function App() {
           preferences: { ...buildPreferences(), style: "short" },
         }),
       });
-      const data = await response.json();
+      let data = await response.json();
+      if (response.status === 202 && data.requestId) data = await waitForChatTask(data.requestId);
       if (!response.ok || !data.answer) throw new Error(data.error || "Could not make notes.");
       const lines = String(data.answer).trim().split("\n");
       const title = (question?.content || "Short notes").slice(0, 60);
