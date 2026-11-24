@@ -1,0 +1,2 @@
+[functions.global-ai-chat-worker]
+verify_jwt = false
