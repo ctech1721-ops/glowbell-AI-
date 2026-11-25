@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from "react";
-import { supabase } from "./supabaseClient";
+import { auth } from "./apiClient";
 import { Eye, EyeOff } from "lucide-react";
 import GlobalLogo from "./GlobalLogo";
 
@@ -28,10 +28,7 @@ export default function Auth({ onLogin, onOwnerLogin, recovery = false, onRecove
     if (!cleanEmail) { setError("Please enter your email address."); return; }
     setLoading(true);
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: import.meta.env.VITE_SITE_URL || window.location.origin,
-      });
-      if (resetError) throw resetError;
+      await auth.forgotPassword(cleanEmail);
       setNotice("Password reset link sent. Open the link in your email to set a new password.");
     } catch (err) {
       setError(err.message || "Could not send reset email.");
@@ -51,9 +48,9 @@ export default function Auth({ onLogin, onOwnerLogin, recovery = false, onRecove
     }
     setLoading(true);
     try {
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
-      await supabase.auth.signOut();
+      const resetToken = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("token") || "";
+      await auth.resetPassword(resetToken, password);
+      auth.signOut();
       try { window.history.replaceState(null, "", window.location.pathname); } catch {}
       setPassword("");
       setConfirmPassword("");
@@ -131,38 +128,11 @@ export default function Auth({ onLogin, onOwnerLogin, recovery = false, onRecove
   }
 }
       if (mode === "signup") {
-        const { data, error: authError } =
-          await supabase.auth.signUp({
-            email: cleanEmail,
-            password,
-            options: {
-              data: {
-                full_name: name.trim(),
-              },
-            },
-          });
-
-        if (authError) throw authError;
-
-        if (data.session) {
-          onLogin(data.session.user);
-        } else {
-          setNotice(
-            "Account created/requested. Check your email for verification, then log in."
-          );
-          setMode("login");
-          setPassword("");
-        }
+        const user = await auth.signUp({ email: cleanEmail, password, name: name.trim() });
+        onLogin(user);
       } else {
-        const { data, error: authError } =
-          await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password,
-          });
-
-        if (authError) throw authError;
-
-        onLogin(data.user);
+        const user = await auth.signIn({ email: cleanEmail, password });
+        onLogin(user);
       }
     } catch (err) {
       setError(err.message || "Authentication failed.");

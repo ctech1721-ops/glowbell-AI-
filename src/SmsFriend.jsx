@@ -3,15 +3,14 @@ import {
   X, Search, UserPlus, Send, Paperclip, Image as ImageIcon, Film, ArrowLeft,
   Trash2, MessageCircle, Play, Download, Users, Loader2, Check, Ban, Clock, ShieldOff, FileText, Inbox,
 } from "lucide-react";
-import { supabase } from "./supabaseClient";
+import { api, apiBytes } from "./apiClient";
 
 /* =====================================================================
    SMS Friend — private chat between two Global AI users.
    Text, photos and videos. Completely separate from the AI chat.
-   Database: supabase/sms_setup.sql
+   Database: neon/schema.sql (served through /api/sms/*)
    ===================================================================== */
 
-const BUCKET = "sms-media";
 const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_VIDEO = 50 * 1024 * 1024;
 const MAX_FILE = 50 * 1024 * 1024;
@@ -19,9 +18,20 @@ const MAX_FILE = 50 * 1024 * 1024;
 const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((n || 0) / 1024))} KB`);
 const fileExt = (name) => ((name || "").split(".").pop() || "").slice(0, 5).toUpperCase();
 
-const isMissingTable = (err) =>
-  err && (err.code === "42P01" || err.code === "PGRST205" || err.code === "PGRST202" ||
-    /does not exist|schema cache|Could not find/i.test(err.message || ""));
+const isMissingTable = (err) => err && /does not exist|relation .* missing/i.test(err.message || "");
+
+// Files are stored in Neon in <= 3 MB parts; download them and rebuild one Blob.
+const mediaBlobCache = new Map();
+async function fetchMediaBlob(m) {
+  if (mediaBlobCache.has(m.media_path)) return mediaBlobCache.get(m.media_path);
+  const parts = [];
+  for (let i = 0; i < Math.max(1, m.media_parts || 1); i += 1) {
+    parts.push(await apiBytes(`/api/sms/media/${m.media_path}/${i}`));
+  }
+  const blob = new Blob(parts, { type: m.media_content_type || "application/octet-stream" });
+  mediaBlobCache.set(m.media_path, blob);
+  return blob;
+}
 
 const initials = (name, email) =>
   (name || email || "?").trim().split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("") || "?";
@@ -50,29 +60,23 @@ export function useSmsUnread(userId) {
 
   const refresh = useCallback(async () => {
     if (!userId) return;
-    const { data, error } = await supabase
-      .from("sms_messages").select("sender_id, created_at")
-      .eq("receiver_id", userId).order("created_at", { ascending: false }).limit(300);
-    if (!error && data) setIncoming(data);
-    const req = await supabase.from("sms_requests").select("id", { count: "exact", head: true })
-      .eq("receiver_id", userId).eq("status", "pending");
-    if (!req.error) setRequestCount(req.count || 0);
+    try {
+      const data = await api("/api/sms/unread");
+      setIncoming(data.incoming || []);
+      setRequestCount(data.requestCount || 0);
+    } catch { /* offline or not set up — try again on the next poll */ }
   }, [userId]);
 
   useEffect(() => {
     if (!userId) return undefined;
     refresh();
-    const timer = window.setInterval(refresh, 15000);
-    let channel;
-    try {
-      channel = supabase.channel(`sms-unread-${userId}`)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "sms_messages", filter: `receiver_id=eq.${userId}` }, refresh)
-        .on("postgres_changes", { event: "*", schema: "public", table: "sms_requests", filter: `receiver_id=eq.${userId}` }, refresh)
-        .subscribe();
-    } catch { /* realtime unavailable — polling still works */ }
+    // Neon has no realtime push, so poll (also refresh when the tab becomes visible again).
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 10000);
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(timer);
-      if (channel) supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [userId, refresh]);
 
@@ -112,6 +116,9 @@ export default function SmsFriend({ user, onClose, sms }) {
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [urls, setUrls] = useState({});
+  const urlsRef = useRef({});
+  urlsRef.current = urls;
+  const loadingMediaRef = useRef(new Set());
   const [text, setText] = useState("");
   const [pending, setPending] = useState([]); // [{file, preview, kind}]
   const [sending, setSending] = useState(false);
@@ -131,108 +138,61 @@ export default function SmsFriend({ user, onClose, sms }) {
 
   const active = friends.find((f) => f.friend_id === activeId) || null;
 
-  // make sure my own profile row exists (needed so friends can find me)
-  useEffect(() => {
-    supabase.from("profiles").upsert({
-      id: me,
-      email: (user.email || "").toLowerCase(),
-      name: user.user_metadata?.full_name || user.user_metadata?.name || "",
-    }, { onConflict: "id" }).then(({ error }) => {
-  if (error) console.error("SMS PROFILES ERROR:", error);
-  if (isMissingTable(error)) setSetupNeeded(true);
-});
-  }, [me, user]);
-
   const loadFriends = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("sms_friends").select("friend_id, friend_email, friend_name, created_at")
-      .eq("user_id", me).order("created_at", { ascending: false });
-    setLoadingFriends(false);
-    if (error) {
+    try {
+      const { friends: data } = await api("/api/sms/friends");
+      setLoadingFriends(false);
+      setFriends(data || []);
+    } catch (error) {
+      setLoadingFriends(false);
       if (isMissingTable(error)) {
-  console.error("SMS FRIENDS ERROR:", error);
-  setSetupNeeded(true);
-}
-      else setNotice(error.message);
-      return;
+        console.error("SMS FRIENDS ERROR:", error);
+        setSetupNeeded(true);
+      } else setNotice(error.message);
     }
-    setFriends(data || []);
   }, [me]);
 
   const loadRequests = useCallback(async () => {
-    const [inc, out, blk] = await Promise.all([
-      // Select all columns so an optional/misspelled display column cannot
-      // make the entire incoming-request query fail.
-      supabase.from("sms_requests").select("*")
-        .eq("receiver_id", me).eq("status", "pending").order("created_at", { ascending: false }),
-      supabase.from("sms_requests").select("*")
-        .eq("requester_id", me).eq("status", "pending").order("created_at", { ascending: false }),
-      supabase.from("sms_blocks").select("blocked_id, blocked_email, blocked_name").eq("blocker_id", me),
-    ]);
-    if (isMissingTable(inc.error) || isMissingTable(blk.error)) {
-      console.error("SMS REQUESTS ERROR:", inc.error, blk.error);
-      setReqSetupNeeded(true);
-      return;
+    try {
+      const data = await api("/api/sms/requests");
+      setReqSetupNeeded(false);
+      setIncomingReqs(data.incoming || []);
+      setSentReqs(data.sent || []);
+      setBlocked(data.blocked || []);
+    } catch (error) {
+      if (isMissingTable(error)) { console.error("SMS REQUESTS ERROR:", error); setReqSetupNeeded(true); return; }
+      console.error("SMS REQUESTS LOAD ERROR:", error);
+      setNotice(`Could not load requests: ${error.message}`);
     }
-    setReqSetupNeeded(false);
-    if (inc.error) {
-      console.error("SMS INCOMING REQUESTS LOAD ERROR:", inc.error);
-      setNotice(`Could not load incoming requests: ${inc.error.message}`);
-    } else {
-      setIncomingReqs((inc.data || []).map((r) => ({
-        ...r,
-        requester_email: r.requester_email || r.requuester_email || "",
-        requester_name: r.requester_name || r.requuester_name || "",
-      })));
-    }
-    if (out.error) console.error("SMS SENT REQUESTS LOAD ERROR:", out.error);
-    else setSentReqs((out.data || []).map((r) => ({
-      ...r,
-      receiver_email: r.receiver_email || r.requuester_email || "",
-      receiver_name: r.receiver_name || r.requuester_name || "",
-    })));
-    if (!blk.error) setBlocked(blk.data || []);
   }, [me]);
 
   useEffect(() => { loadFriends(); loadRequests(); }, [loadFriends, loadRequests]);
 
   // keep requests / new friends fresh while the window is open
   useEffect(() => {
-    const timer = window.setInterval(() => { loadFriends(); loadRequests(); }, 6000);
-    let channel;
-    try {
-      channel = supabase.channel(`sms-requests-${me}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "sms_requests" }, () => { loadFriends(); loadRequests(); })
-        .subscribe();
-    } catch { /* polling covers it */ }
-    return () => { window.clearInterval(timer); if (channel) supabase.removeChannel(channel); };
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") { loadFriends(); loadRequests(); } }, 6000);
+    return () => window.clearInterval(timer);
   }, [me, loadFriends, loadRequests]);
 
+  // Download image/video parts once and show them from local blob: URLs.
   const signMedia = useCallback(async (list) => {
-    const paths = list.filter((m) => m.media_path && m.media_type !== "file").map((m) => m.media_path);
-    if (!paths.length) return;
-    setUrls((prev) => {
-      const need = paths.filter((p) => !prev[p]);
-      if (!need.length) return prev;
-      supabase.storage.from(BUCKET).createSignedUrls(need, 3600).then(({ data }) => {
-        if (!data) return;
-        setUrls((cur) => {
-          const next = { ...cur };
-          data.forEach((row) => { if (row.signedUrl && row.path) next[row.path] = row.signedUrl; });
-          return next;
-        });
-      });
-      return prev;
-    });
+    const wanted = list.filter((m) => m.media_path && m.media_type !== "file");
+    for (const m of wanted) {
+      if (urlsRef.current[m.media_path] || loadingMediaRef.current.has(m.media_path)) continue;
+      loadingMediaRef.current.add(m.media_path);
+      fetchMediaBlob(m).then((blob) => {
+        setUrls((cur) => ({ ...cur, [m.media_path]: URL.createObjectURL(blob) }));
+      }).catch((error) => console.error("SMS media load error:", error.message))
+        .finally(() => loadingMediaRef.current.delete(m.media_path));
+    }
   }, []);
 
   const loadMessages = useCallback(async (friendId) => {
     if (!friendId) return;
-    const { data, error } = await supabase
-      .from("sms_messages").select("*")
-      .or(`and(sender_id.eq.${me},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${me})`)
-      .order("created_at", { ascending: true }).limit(500);
-    if (error) { setNotice(error.message); return; }
+    let data;
+    try {
+      ({ messages: data } = await api(`/api/sms/messages/${friendId}`));
+    } catch (error) { setNotice(error.message); return; }
     if (activeRef.current !== friendId) return;
     setMessages((prev) => (prev.length === (data || []).length && prev.at(-1)?.id === data?.at(-1)?.id ? prev : data || []));
     signMedia(data || []);
@@ -244,14 +204,8 @@ export default function SmsFriend({ user, onClose, sms }) {
     setMessages([]);
     loadMessages(activeId);
     sms.markRead(activeId);
-    const timer = window.setInterval(() => { loadMessages(activeId); sms.markRead(activeId); }, 4000);
-    let channel;
-    try {
-      channel = supabase.channel(`sms-chat-${me}-${activeId}`)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "sms_messages", filter: `receiver_id=eq.${me}` }, () => loadMessages(activeId))
-        .subscribe();
-    } catch { /* polling covers it */ }
-    return () => { window.clearInterval(timer); if (channel) supabase.removeChannel(channel); };
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") { loadMessages(activeId); sms.markRead(activeId); } }, 3000);
+    return () => window.clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, me]);
 
@@ -268,15 +222,17 @@ export default function SmsFriend({ user, onClose, sms }) {
     const email = addEmail.trim().toLowerCase();
     if (!email || adding) return;
     setAdding(true); setNotice("");
-    const { data, error } = await supabase.rpc("sms_send_request", { p_email: email });
-    setAdding(false);
-    if (error) {
+    let row;
+    try {
+      ({ result: row } = await api("/api/sms/requests", { method: "POST", body: { email } }));
+    } catch (error) {
+      setAdding(false);
       if (isMissingTable(error)) { setReqSetupNeeded(true); setShowReqs(true); setNotice("Friend requests are not set up yet. Open “Requests” below and follow the steps."); }
-      else setNotice(error.message.replace(/^.*?:\s*/, ""));
+      else setNotice(error.message);
       return;
     }
+    setAdding(false);
     setAddEmail("");
-    const row = Array.isArray(data) ? data[0] : data;
     await Promise.all([loadFriends(), loadRequests()]);
     sms.refresh();
     if (row?.out_status === "sent") {
@@ -289,9 +245,10 @@ export default function SmsFriend({ user, onClose, sms }) {
   async function answerRequest(req, action) {
     if (action === "block" && !window.confirm(`Block ${req.requester_name || req.requester_email}? They will not be able to send you requests or messages.`)) return;
     setBusyReq(req.id); setNotice("");
-    const { error } = await supabase.rpc("sms_respond_request", { p_request: req.id, p_action: action });
+    try {
+      await api(`/api/sms/requests/${req.id}/respond`, { method: "POST", body: { action } });
+    } catch (error) { setBusyReq(""); setNotice(error.message); return; }
     setBusyReq("");
-    if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
     await Promise.all([loadFriends(), loadRequests()]);
     sms.refresh();
     if (action === "accept") { setShowReqs(false); setActiveId(req.requester_id); setView("chat"); setTab("chat"); }
@@ -300,15 +257,17 @@ export default function SmsFriend({ user, onClose, sms }) {
   async function blockActive() {
     if (!active) return;
     if (!window.confirm(`Block ${active.friend_name || active.friend_email}? They will be removed from your friends and cannot message you.`)) return;
-    const { error } = await supabase.rpc("sms_block_user", { p_user: active.friend_id });
-    if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
+    try {
+      await api("/api/sms/block", { method: "POST", body: { userId: active.friend_id } });
+    } catch (error) { setNotice(error.message); return; }
     setActiveId(null); setView("list");
     await Promise.all([loadFriends(), loadRequests()]);
   }
 
   async function unblock(b) {
-    const { error } = await supabase.rpc("sms_unblock_user", { p_user: b.blocked_id });
-    if (error) { setNotice(error.message.replace(/^.*?:\s*/, "")); return; }
+    try {
+      await api("/api/sms/unblock", { method: "POST", body: { userId: b.blocked_id } });
+    } catch (error) { setNotice(error.message); return; }
     loadRequests();
   }
 
@@ -341,29 +300,31 @@ export default function SmsFriend({ user, onClose, sms }) {
       if (pending.length) {
         for (let i = 0; i < pending.length; i += 1) {
           const { file, kind } = pending[i];
-          const ext = (file.name.split(".").pop() || (kind === "image" ? "jpg" : kind === "video" ? "mp4" : "bin")).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "bin";
-          const path = `${me}/${active.friend_id}/${crypto.randomUUID()}.${ext}`;
-          const up = await supabase.storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false });
-          if (up.error) throw up.error;
-          const { error } = await supabase.from("sms_messages").insert({
-            sender_id: me, receiver_id: active.friend_id, body: i === 0 ? body || null : null,
-            media_path: path, media_type: kind,
-            ...(kind === "file" ? { media_name: file.name.slice(0, 200), media_size: file.size } : {}),
+          const { id, partSize } = await api("/api/sms/media", {
+            method: "POST",
+            body: { receiverId: active.friend_id, contentType: file.type || "application/octet-stream", size: file.size },
           });
-          if (error) throw error;
+          const chunk = Math.min(partSize || 3145728, 3145728);
+          for (let offset = 0, idx = 0; offset < file.size; offset += chunk, idx += 1) {
+            await apiBytes(`/api/sms/media/${id}/${idx}`, { method: "PUT", body: file.slice(offset, offset + chunk) });
+          }
+          await api("/api/sms/messages", {
+            method: "POST",
+            body: {
+              receiverId: active.friend_id, body: i === 0 ? body || null : null,
+              mediaId: id, mediaType: kind, mediaName: file.name.slice(0, 200), mediaSize: file.size,
+            },
+          });
         }
         pending.forEach((p) => p.preview && URL.revokeObjectURL(p.preview));
         setPending([]);
       } else {
-        const { error } = await supabase.from("sms_messages").insert({ sender_id: me, receiver_id: active.friend_id, body });
-        if (error) throw error;
+        await api("/api/sms/messages", { method: "POST", body: { receiverId: active.friend_id, body } });
       }
       setText("");
       await loadMessages(active.friend_id);
     } catch (err) {
-      setNotice(/media_name|media_size|media_type_check/i.test(err.message || "")
-        ? "File sending is not set up yet. Run supabase/sms_files_setup.sql in Supabase → SQL Editor."
-        : err.message || "Message could not be sent.");
+      setNotice(err.message || "Message could not be sent.");
     } finally {
       setSending(false);
     }
@@ -371,9 +332,10 @@ export default function SmsFriend({ user, onClose, sms }) {
 
   async function removeMessage(m) {
     if (!window.confirm("Delete this message for everyone?")) return;
-    const { error } = await supabase.from("sms_messages").delete().eq("id", m.id);
-    if (error) { setNotice(error.message); return; }
-    if (m.media_path) supabase.storage.from(BUCKET).remove([m.media_path]);
+    try {
+      await api(`/api/sms/messages/${m.id}`, { method: "DELETE" });
+    } catch (error) { setNotice(error.message); return; }
+    if (m.media_path) mediaBlobCache.delete(m.media_path);
     setMessages((prev) => prev.filter((x) => x.id !== m.id));
   }
 
@@ -409,8 +371,8 @@ export default function SmsFriend({ user, onClose, sms }) {
   };
 
   async function downloadFile(m) {
-    const { data, error } = await supabase.storage.from(BUCKET).download(m.media_path);
-    if (error || !data) { setNotice(error?.message || "Could not download the file."); return; }
+    let data;
+    try { data = await fetchMediaBlob(m); } catch (error) { setNotice(error.message || "Could not download the file."); return; }
     const url = URL.createObjectURL(data);
     const a = document.createElement("a");
     a.href = url; a.download = m.media_name || "file"; document.body.appendChild(a); a.click(); a.remove();
@@ -454,7 +416,7 @@ export default function SmsFriend({ user, onClose, sms }) {
             {setupNeeded ? (
               <div className="gx-sms-empty is-setup">
                 <strong>One-time setup needed</strong>
-                <p>Open Supabase → SQL Editor, paste everything from <code>supabase/sms_setup.sql</code> and press Run. Then run <code>supabase/sms_run_this_once.sql</code> the same way and reload this page.</p>
+                <p>The database is not set up yet. Run <code>neon/schema.sql</code> in the Neon SQL Editor, then reload this page.</p>
               </div>
             ) : loadingFriends ? (
               <div className="gx-sms-empty"><Loader2 className="gx-spin" /></div>
@@ -499,7 +461,7 @@ export default function SmsFriend({ user, onClose, sms }) {
                 {reqSetupNeeded ? (
                   <div className="gx-sms-empty is-setup">
                     <strong>One-time setup needed for requests</strong>
-                    <p>Open Supabase → SQL Editor → New query, paste everything from <code>supabase/sms_run_this_once.sql</code>, press Run, then reload this page.</p>
+                    <p>The database is not set up yet. Run <code>neon/schema.sql</code> in the Neon SQL Editor, then reload this page.</p>
                   </div>
                 ) : (
                   <>

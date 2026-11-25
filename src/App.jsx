@@ -18,7 +18,7 @@ import "katex/dist/katex.min.css";
 
 import ReportProblem from "./ReportProblem";
 import Auth from "./Auth";
-import { supabase } from "./supabaseClient";
+import { api, auth, getToken } from "./apiClient";
 import OwnerDashboard from "./OwnerDashboard";
 import NotesWidget from "./NotesWidget";
 import FeatureHub from "./FeatureHub";
@@ -230,7 +230,7 @@ function makeTitle(messages) {
   return title.length > 38 ? `${title.slice(0, 38)}…` : title;
 }
 
-// Never save base64 image/file data or temporary URLs in Supabase.
+// Never save base64 image/file data or temporary URLs in the database.
 function sanitizeMessages(messages) {
   return messages.map((message) => {
     const {
@@ -385,7 +385,7 @@ export default function App() {
   // File selected for the next message.
   const [selectedAttachments, setSelectedAttachments] = useState([]);
 
-  // Private in-memory context for this chat. Not saved to Supabase.
+  // Private in-memory context for this chat. Not saved to the database.
   // Reuse this attachment for follow-up questions until a new chat is opened.
   const [contextAttachments, setContextAttachments] = useState([]);
 
@@ -446,15 +446,8 @@ export default function App() {
       if (document.visibilityState !== "visible") return;
       if (Date.now() - lastActivity > 120000) return; // idle for 2 minutes
       try {
-        const { data } = await supabase.auth.getSession();
-        const token = data?.session?.access_token;
-        if (!token) return;
-        await fetch("/api/usage/heartbeat", {
-          method: "POST",
-          keepalive: true,
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ seconds: STEP }),
-        });
+        if (!getToken()) return;
+        await api("/api/usage/heartbeat", { method: "POST", keepalive: true, body: { seconds: STEP } });
       } catch { /* offline — try again next time */ }
     }
 
@@ -495,28 +488,16 @@ export default function App() {
 
     async function loadSession() {
       if (/type=recovery/.test(window.location.hash)) setRecovering(true);
-      const { data, error: sessionError } = await supabase.auth.getSession();
+      const user = await auth.restore();
       if (!active) return;
-      if (sessionError) console.error(sessionError.message);
-      setAuthUser(data?.session?.user ?? null);
+      setAuthUser(user);
       setAuthReady(true);
     }
 
     loadSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (_event === "PASSWORD_RECOVERY") setRecovering(true);
-        if (active) {
-          setAuthUser(session?.user ?? null);
-          setAuthReady(true);
-        }
-      }
-    );
-
     return () => {
       active = false;
-      subscription.unsubscribe();
     };
   }, []);
 
@@ -560,20 +541,18 @@ export default function App() {
 
     async function loadChats() {
       setError("");
-      const { data, error: loadError } = await supabase
-        .from("chats")
-        .select("id, user_id, title, messages, created_at, updated_at")
-        .eq("user_id", authUser.id)
-        .order("updated_at", { ascending: false });
-
-      if (!active) return;
-
-      if (loadError) {
+      let data;
+      try {
+        ({ chats: data } = await api("/api/chats"));
+      } catch (loadError) {
+        if (!active) return;
         console.error("Could not load chats:", loadError.message);
         setError(`Could not load chat history: ${loadError.message}`);
         setHistory([]);
         return;
       }
+
+      if (!active) return;
 
       setHistory((data || []).map((chat) => ({
         id: chat.id,
@@ -611,15 +590,12 @@ export default function App() {
       }, ...previous.filter((chat) => chat.id !== id)];
     });
 
-    const { error: saveError } = await supabase.from("chats").upsert({
-      id,
-      user_id: authUser.id,
-      title,
-      messages: messagesToSave,
-      updated_at: new Date(updatedAt).toISOString(),
-    }, { onConflict: "id" });
-
-    if (saveError) {
+    try {
+      await api(`/api/chats/${id}`, {
+        method: "PUT",
+        body: { title, messages: messagesToSave, updatedAt: new Date(updatedAt).toISOString() },
+      });
+    } catch (saveError) {
       console.error("Could not save chat:", saveError.message);
       setError(`Chat save failed: ${saveError.message}`);
     }
@@ -1104,13 +1080,9 @@ export default function App() {
   async function deleteChatFromDatabase(chatId) {
     if (!authUser?.id) return;
 
-    const { error: deleteError } = await supabase
-      .from("chats")
-      .delete()
-      .eq("id", chatId)
-      .eq("user_id", authUser.id);
-
-    if (deleteError) {
+    try {
+      await api(`/api/chats/${chatId}`, { method: "DELETE" });
+    } catch (deleteError) {
       setError(`Could not delete chat: ${deleteError.message}`);
       return;
     }
@@ -1185,11 +1157,7 @@ export default function App() {
     if (loading) return;
     if (!window.confirm("Are you sure you want to logout?")) return;
 
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) {
-      setError(`Logout failed: ${signOutError.message}`);
-      return;
-    }
+    auth.signOut();
 
     setAuthUser(null);
     setHistory([]);
@@ -1205,12 +1173,9 @@ export default function App() {
     if (loading || !history.length || !authUser?.id) return;
     if (!window.confirm("Delete all saved chat history? This cannot be undone.")) return;
 
-    const { error: deleteError } = await supabase
-      .from("chats")
-      .delete()
-      .eq("user_id", authUser.id);
-
-    if (deleteError) {
+    try {
+      await api("/api/chats", { method: "DELETE" });
+    } catch (deleteError) {
       setError(`Could not clear history: ${deleteError.message}`);
       return;
     }
@@ -1667,7 +1632,7 @@ export default function App() {
     );
   }
 
-  const userName = authUser?.user_metadata?.full_name || authUser?.user_metadata?.name || "";
+  const userName = authUser?.name || "";
   const firstName = userName.trim().split(/\s+/)[0];
   const lastIndex = messages.length - 1;
   const lastAssistantIndex = messages.findLastIndex((m) => m.role === "assistant");

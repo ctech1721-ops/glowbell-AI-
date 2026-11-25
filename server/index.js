@@ -3,7 +3,13 @@ import express from "express";
 import cors from "cors";
 import { createRequire } from "node:module";
 import mammoth from "mammoth";
-import { createClient } from "@supabase/supabase-js";
+import { query } from "./db.js";
+import authRouter, { requireAuth } from "./auth.js";
+import apiRouter from "./routes.js";
+import {
+  enqueueChatTask, claimChatTask, heartbeatChatTask, completeChatTask,
+  failChatTask, recoverExpiredChatTasks, getChatTask,
+} from "./queue.js";
 import crypto from "node:crypto";
 import JSZip from "jszip";
 import { pathToFileURL } from "node:url";
@@ -23,6 +29,10 @@ console.log("OWNER SECRET CHECK:", {
 app.use(cors());
 app.use(express.json({ limit: "30mb" }));
 
+// Own auth (signup/login/reset) and the data API that replaces direct Supabase access.
+app.use("/api/auth", authRouter);
+app.use("/api", apiRouter);
+
 console.log(
   "OWNER SECRET CHECK:",
   Boolean(process.env.OWNER_SESSION_SECRET),
@@ -31,38 +41,15 @@ console.log(
 );
 
 // --------------------------------------------------
-// ENVIRONMENT AND SUPABASE
+// ENVIRONMENT AND NEON (PostgreSQL)
 // --------------------------------------------------
 
-const supabaseUrl = process.env.SUPABASE_URL?.trim();
-const supabaseServiceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-
-if (
-  !supabaseUrl ||
-  !/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl)
-) {
-  throw new Error(
-    "Invalid SUPABASE_URL. Check your root .env file."
-  );
+if (!process.env.DATABASE_URL?.trim()) {
+  throw new Error("DATABASE_URL is missing. Add your Neon connection string to your root .env file.");
 }
-
-if (!supabaseServiceRoleKey) {
-  throw new Error(
-    "SUPABASE_SERVICE_ROLE_KEY is missing from your root .env file."
-  );
+if ((process.env.AUTH_JWT_SECRET?.trim().length || 0) < 32) {
+  console.error("AUTH_JWT_SECRET is missing or shorter than 32 characters. Login will not work until it is set.");
 }
-
-const supabaseAdmin = createClient(
-  supabaseUrl,
-  supabaseServiceRoleKey,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
 
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY?.trim();
 const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim();
@@ -84,11 +71,7 @@ const MODEL = GROQ_MODEL;
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 
-console.log("Supabase URL configured:", Boolean(supabaseUrl));
-console.log(
-  "Supabase service key configured:",
-  Boolean(supabaseServiceRoleKey)
-);
+console.log("Neon database configured:", Boolean(process.env.DATABASE_URL));
 
 // --------------------------------------------------
 // OFFICIAL DOMAINS
@@ -1608,18 +1591,51 @@ Respond to what the user actually says, not like a scripted chatbot.
 - Share interesting facts or ideas only when they add value.
 - Avoid generic questions when a more specific question is possible.
 
-5. LANGUAGE AND TONE
-- Detect the language used in the latest user message.
-- If the user speaks English, reply in natural English.
-- If the user speaks Tanglish, reply in natural, readable Tanglish.
-- Write Tanglish using English letters only.
-- Never output Tamil-script characters.
-- Keep the same level of formality throughout the reply.
-- Do not mix informal words like "nee" with formal verb forms
-  like "virumbureenga" in the same sentence.
-- Avoid awkward word-for-word translations.
-- Use correct spelling, grammar and punctuation.
-- Keep casual language friendly, not unnecessarily formal.
+
+5. LANGUAGE DETECTION AND NATURAL TANGlish:
+
+- Detect the language and writing style used by the user.
+- If the user writes in English, reply in natural English.
+- If the user writes in Tamil script, reply in conversational Tamil.
+- If the user writes in Tanglish (Tamil using English letters), reply in natural Tanglish using English letters only.
+- If the user writes in Hindi, reply in Hindi.
+- When the user writes in Tanglish, the entire explanation must be in natural Tanglish, including educational and technical topics.
+- Do not generate an English introduction followed by Tanglish examples. Keep the complete response in Tanglish.
+- Before responding, verify that the response does not unintentionally switch to English.
+
+- Use natural spoken Tanglish, not formal Tamil mixed with English.
+- Avoid unnatural constructions such as "English-pole", "syntax-uḷḷa" and "execute aagum".
+- Prefer simple conversational phrases like "romba easy-ah irukkum", "use panni create pannalam", "epdi work aagum".
+- Do not use Tamil diacritics or scholarly transliteration. Write Tamil words in simple English letters.
+- Technical English terms are allowed, but explain them naturally in Tanglish.
+
+- Explain technical concepts as if teaching a beginner friend in everyday spoken Tanglish.
+- Prefer simple sentence structures instead of English grammar translated into Tamil words.
+- Avoid unnecessary hyphens, special Tamil transliteration symbols and overly formal wording.
+- Use short, clear Tanglish sentences. Explain one idea at a time.
+
+
+
+
+NATURAL TANGlish RULES:
+
+- Write like a fluent Tamil speaker naturally chatting in English letters.
+- Use proper Tamil words written in English letters.
+- Do not translate every Tamil word into English.
+- Do not add unnecessary English words at the end of Tamil sentences.
+- Do not mix English and Tanglish randomly.
+- Common English words such as "Hi", "Okay", "Nice", "Thank you" and technical terms are allowed when natural.
+- Maintain consistent and respectful conversational language.
+- Prefer "Neenga" over "Nee" when using respectful conversation.
+- Use natural Tamil sentence structure, not English sentence structure translated word by word.
+- Never produce awkward or artificial Tanglish.
+- Do not unnecessarily repeat the user's name.
+IMPORTANT:
+- Follow the user's language consistently throughout the conversation.
+- Never switch languages without a reason.
+- Prioritize natural conversational language over literal translation.
+- Before sending, silently proofread every sentence for natural grammar and word choice.
+
 
 6. CONVERSATION PERSONALITY
 - Be friendly, thoughtful, curious and occasionally humorous.
@@ -1771,6 +1787,30 @@ clearly asks for information or guidance.
 - Ask one casual question related to their musical taste.
 - Offer lessons or playing tips only when explicitly requested.
 - Never assume the user's skill level or what they already know.
+
+
+TANGLISH LANGUAGE RULES:
+
+1. If the user writes in Tanglish (Tamil using English letters), always respond in natural conversational Tanglish.
+
+2. Do not reply entirely in English when the user asks in Tanglish.
+
+3. Keep technical terms such as Python, JavaScript, API, Database and Coding in English, but explain their meanings in simple Tanglish.
+
+4. Use natural spoken Tamil sentence structure written in English letters.
+
+5. Avoid awkward word-by-word translations.
+
+6. Maintain the user's language throughout the conversation.
+
+7. Check the latest user message to identify the language. Do not blindly follow the language of older messages.
+
+8. If the user switches from Tanglish to English or Tamil, adapt accordingly.
+
+9. Never force Tanglish when the user communicates in English.
+
+10. Prioritize naturalness, clarity and conversational flow.
+
 
 CONTEXT:
 Current-information question: ${currentQuestion ? "Yes" : "No"}
@@ -2003,14 +2043,11 @@ app.get("/api/owner/users", async (req, res) => {
       });
     }
 
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
-      page: 1,
-      perPage: 1000,
-    });
+    const { rows: userRows } = await query(
+      "select id, email, created_at, last_sign_in_at from users order by created_at desc limit 1000"
+    );
 
-    if (error) throw error;
-
-    const users = data.users.map((user) => ({
+    const users = userRows.map((user) => ({
       id: user.id,
       email: user.email || "",
       createdAt: user.created_at,
@@ -2069,16 +2106,9 @@ function verifyOwnerRequest(req) {
   }
 }
 
-app.post("/api/usage/heartbeat", async (req, res) => {
+app.post("/api/usage/heartbeat", requireAuth, async (req, res) => {
   try {
-    const authHeader = String(req.headers.authorization || "");
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return res.status(401).json({ error: "Login required." });
-
-    const { data, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !data?.user) return res.status(401).json({ error: "Invalid session." });
-
-    const userId = data.user.id;
+    const userId = req.user.id;
     const now = Date.now();
     const previous = lastBeatAt.get(userId) || 0;
     // Best-effort per-process flood protection. The database RPC performs
@@ -2086,12 +2116,7 @@ app.post("/api/usage/heartbeat", async (req, res) => {
     if (now - previous < 20000) return res.json({ ok: true, skipped: true });
 
     const seconds = Math.min(60, Math.max(1, Math.round(Number(req.body?.seconds) || 30)));
-    const { error: heartbeatError } = await supabaseAdmin.rpc("add_usage_seconds", {
-      p_user_id: userId,
-      p_date: usageDateString(),
-      p_seconds: seconds,
-    });
-    if (heartbeatError) throw heartbeatError;
+    await query("select add_usage_seconds($1, $2::date, $3)", [userId, usageDateString(), seconds]);
 
     lastBeatAt.set(userId, now);
     if (lastBeatAt.size > 5000) {
@@ -2115,48 +2140,20 @@ app.get("/api/owner/usage", async (req, res) => {
   }
 
   try {
-    const [usersResult, usageResult] = await Promise.all([
-      supabaseAdmin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-      }),
+    let userRows;
+    let rows;
 
-      supabaseAdmin
-        .from("user_usage_daily")
-        .select("user_id, usage_date, seconds, last_seen")
-        .order("last_seen", { ascending: false })
-        .limit(50000),
-    ]);
+    try {
+      [{ rows: userRows }, { rows }] = await Promise.all([
+        query("select id, email, name, created_at, last_sign_in_at from users order by created_at desc limit 1000"),
+        query(
+          "select user_id, usage_date, seconds, last_seen from user_usage_daily order by last_seen desc limit 50000"
+        ),
+      ]);
+    } catch (dbError) {
+      console.error("NEON USAGE ERROR:", { message: dbError.message, code: dbError.code });
 
-    const { data: usersData, error: usersError } = usersResult;
-    const { data: rows, error: usageError } = usageResult;
-
-    // Log the exact Supabase errors without exposing API keys.
-    if (usersError) {
-      console.error("SUPABASE USERS ERROR:", {
-        message: usersError.message,
-        status: usersError.status,
-        code: usersError.code,
-        details: usersError.details,
-      });
-
-      return res.status(500).json({
-        error: "Could not load registered users.",
-      });
-    }
-
-    if (usageError) {
-      console.error("SUPABASE USAGE ERROR:", {
-        message: usageError.message,
-        code: usageError.code,
-        details: usageError.details,
-        hint: usageError.hint,
-      });
-
-      const missing =
-        /does not exist|schema cache|Could not find/i.test(
-          usageError.message || ""
-        );
+      const missing = dbError.code === "42P01";
 
       return res.status(missing ? 200 : 500).json({
         setupNeeded: missing,
@@ -2164,7 +2161,7 @@ app.get("/api/owner/usage", async (req, res) => {
         timezone: USAGE_TIMEZONE,
         users: [],
         error: missing
-          ? "Run supabase/usage_setup.sql in the Supabase SQL Editor first."
+          ? "Run neon/schema.sql in the Neon SQL Editor first."
           : "Could not load usage.",
       });
     }
@@ -2179,13 +2176,10 @@ app.get("/api/owner/usage", async (req, res) => {
       }
     }
 
-    const users = (usersData?.users || []).map((user) => ({
+    const users = userRows.map((user) => ({
       id: user.id,
       email: user.email || "",
-      name:
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        "",
+      name: user.name || "",
       createdAt: user.created_at,
       lastSignInAt: user.last_sign_in_at || null,
       lastSeenAt: lastSeenByUser.get(user.id) || null,
@@ -2290,19 +2284,26 @@ app.post("/api/chat", async (req, res) => {
     const requestId = cleanText(req.get("Idempotency-Key") || req.body?.requestId || crypto.randomUUID(), 200);
     const payload = { ...req.body, message, history };
     const payloadHash = crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
-    const { error: enqueueError } = await supabaseAdmin.rpc("enqueue_chat_task", {
-      p_request_id: requestId, p_payload_hash: payloadHash, p_payload: payload, p_max_retries: 3,
-    });
-    if (enqueueError) {
+    try {
+      await enqueueChatTask(requestId, payloadHash, payload, 3);
+    } catch (enqueueError) {
       const conflict = String(enqueueError.message || "").includes("IDEMPOTENCY_KEY_REUSED");
-      return res.status(conflict ? 409 : 503).json({ error: conflict ? "This request ID was already used for a different message." : "Chat queue is unavailable. Apply supabase/chat_queue_setup.sql and retry.", retryable: !conflict });
+      if (!conflict) console.error("Chat enqueue error:", enqueueError.message);
+      return res.status(conflict ? 409 : 503).json({ error: conflict ? "This request ID was already used for a different message." : "Chat queue is unavailable. Apply neon/schema.sql and retry.", retryable: !conflict });
     }
     const deadline = Date.now() + Number(process.env.CHAT_REQUEST_WAIT_MS || 115000);
+    const inlineWorker = process.env.CHAT_INLINE_WORKER !== "0";
+    let kicked = false;
     while (Date.now() < deadline) {
-      const { data: current, error: readError } = await supabaseAdmin.from("chat_tasks").select("status,result,last_error").eq("request_id", requestId).maybeSingle();
-      if (readError) throw readError;
+      const current = await getChatTask(requestId);
       if (current?.status === "completed") return res.json(current.result || { answer: "" });
       if (current?.status === "failed") return res.status(503).json({ error: current.last_error || "AI task failed after retries.", retryable: false });
+      // No separate worker host needed: this API process also drains the queue.
+      // (A standalone worker / external cron can still run alongside it.)
+      if (inlineWorker && !kicked && (!current || current.status === "pending")) {
+        kicked = true;
+        runOneQueuedTask().catch((error) => console.error("Inline worker error:", error.message)).finally(() => { kicked = false; });
+      }
       await new Promise((resolve) => setTimeout(resolve, 700));
     }
     return res.status(202).json({ requestId, status: "processing", message: "Your request is still processing. Retry with the same Idempotency-Key to retrieve its result." });
@@ -2384,8 +2385,7 @@ export async function processQueuedChatPayload(payload) {
 app.get("/api/chat/status/:requestId", async (req, res) => {
   const requestId = cleanText(req.params.requestId, 200);
   try {
-    const { data, error } = await supabaseAdmin.from("chat_tasks").select("status,result,last_error").eq("request_id", requestId).maybeSingle();
-    if (error) throw error;
+    const data = await getChatTask(requestId);
     if (!data) return res.status(404).json({ error: "Chat task not found." });
     if (data.status === "completed") return res.json(data.result || { answer: "" });
     if (data.status === "failed") return res.status(503).json({ error: data.last_error || "AI task failed after retries.", retryable: false });
@@ -2404,6 +2404,59 @@ app.post("/api/internal/process-chat", async (req, res) => {
     const status = Number.isInteger(error?.status) ? error.status : 500;
     return res.status(status).json({ error: error.message || "Chat processing failed", retryable: status === 429 || status >= 500 });
   }
+});
+
+// Claim one pending task from Neon and process it in this process.
+// Used by the chat route itself and by /api/internal/run-worker (external cron).
+export async function runOneQueuedTask() {
+  const leaseSeconds = Math.max(30, Math.min(300, Number(process.env.CHAT_WORKER_LEASE_SECONDS || 180)));
+  await recoverExpiredChatTasks(25);
+  const workerId = `global-ai-inline-${crypto.randomUUID()}`;
+  const task = await claimChatTask(workerId, leaseSeconds);
+  if (!task?.id) return { processed: false, reason: "queue_empty" };
+
+  const token = Number(task.fencing_token);
+  let leaseLost = false;
+  const heartbeat = setInterval(async () => {
+    try {
+      if (!(await heartbeatChatTask(task.id, workerId, token, leaseSeconds))) leaseLost = true;
+    } catch (error) {
+      console.error("Inline worker heartbeat error:", error.message);
+      leaseLost = true;
+    }
+  }, 20000);
+  heartbeat.unref?.();
+
+  try {
+    const result = await processQueuedChatPayload(task.payload || {});
+    if (leaseLost) throw new Error("Worker lease was lost before completion.");
+    await completeChatTask(task.id, workerId, token, result);
+    return { processed: true, requestId: task.request_id, status: "completed" };
+  } catch (error) {
+    const retryable = !Number.isInteger(error?.status) || error.status === 429 || error.status >= 500;
+    try {
+      await failChatTask(task.id, workerId, token, error.message || "Chat processing failed");
+    } catch (dbError) {
+      console.error("Could not mark task failed:", dbError.message);
+    }
+    return { processed: true, requestId: task.request_id, status: retryable ? "retry_or_failed" : "failed", error: error.message };
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+// Replaces the Supabase Edge Function + pg_cron. Point any cron service at this
+// URL (GET or POST) with header  x-chat-worker-secret: <CHAT_WORKER_SECRET>
+// (or Authorization: Bearer <CHAT_WORKER_SECRET>, which Vercel Cron sends).
+app.all("/api/internal/run-worker", async (req, res) => {
+  const expected = process.env.CHAT_WORKER_SECRET || "";
+  const bearer = String(req.get("authorization") || "").replace(/^Bearer /, "");
+  const provided = req.get("x-chat-worker-secret") || bearer;
+  const a = Buffer.from(String(provided));
+  const b = Buffer.from(expected);
+  if (!expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: "Unauthorized worker" });
+  try { return res.json({ ok: true, ...(await runOneQueuedTask()) }); }
+  catch (error) { console.error("run-worker error:", error.message); return res.status(500).json({ error: "Worker invocation failed" }); }
 });
 
 // --------------------------------------------------

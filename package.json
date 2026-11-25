@@ -9,11 +9,13 @@
     "server": "node server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "worker": "node server/worker.js"
+    "worker": "node server/worker.js",
+    "db:setup": "node scripts/setup-db.js",
+    "db:migrate-from-supabase": "node scripts/migrate-from-supabase.js"
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.32",
-    "@supabase/supabase-js": "^2.118.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
@@ -24,6 +26,7 @@
     "mammoth": "^1.13.0",
     "multer": "^2.4.0",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.13.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
