@@ -1897,6 +1897,16 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
     });
   }
 
+  // Image requests already carry image tokens, so keep only a small recent
+  // text history to stay within provider input-token limits. Text-only chats
+  // retain the existing full history behavior.
+  const requestHistory = hasImages
+    ? history.slice(-2).map((item) => ({
+        ...item,
+        content: String(item.content || "").slice(-600),
+      }))
+    : history;
+
   const messages = [
     {
       role: "system",
@@ -1910,7 +1920,7 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
           ? "\n\nThis question involves maths or calculation. Answer with numbered steps (Step 1, Step 2, ...), each with a short bold title and a numeric display equation ($$ on its own lines), then a Final Answer. Never write calculations in words or plain text."
           : ""),
     },
-    ...history,
+    ...requestHistory,
     {
       role: "user",
       content: userContent,
