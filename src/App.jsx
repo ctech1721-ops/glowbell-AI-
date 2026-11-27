@@ -141,6 +141,69 @@ function getMessageAttachments(message) {
   return message?.attachment ? [message.attachment] : [];
 }
 
+
+// Keep attachment bytes in this browser so follow-up questions can reuse the
+// same image/file after a conversation is reopened. Bytes are not sent to the DB.
+const CHAT_CONTEXT_DB = "global-ai-chat-context";
+const CHAT_CONTEXT_STORE = "attachments";
+
+function openChatContextDb() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) return reject(new Error("IndexedDB is unavailable."));
+    const request = indexedDB.open(CHAT_CONTEXT_DB, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(CHAT_CONTEXT_STORE)) {
+        request.result.createObjectStore(CHAT_CONTEXT_STORE, { keyPath: "chatId" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open local chat context."));
+  });
+}
+
+async function saveChatContext(chatId, attachments) {
+  if (!chatId || !attachments?.length) return;
+  const db = await openChatContextDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CHAT_CONTEXT_STORE, "readwrite");
+      tx.objectStore(CHAT_CONTEXT_STORE).put({
+        chatId,
+        attachments: attachments.map(({ name, mimeType, data }) => ({ name, mimeType, data })),
+        updatedAt: Date.now(),
+      });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error("Could not save local attachment context."));
+      tx.onabort = () => reject(tx.error || new Error("Local attachment context save was aborted."));
+    });
+  } finally { db.close(); }
+}
+
+async function loadChatContext(chatId) {
+  if (!chatId) return [];
+  const db = await openChatContextDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = db.transaction(CHAT_CONTEXT_STORE, "readonly").objectStore(CHAT_CONTEXT_STORE).get(chatId);
+      request.onsuccess = () => resolve(Array.isArray(request.result?.attachments) ? request.result.attachments : []);
+      request.onerror = () => reject(request.error || new Error("Could not restore local attachment context."));
+    });
+  } finally { db.close(); }
+}
+
+async function deleteChatContext(chatId) {
+  if (!chatId || !("indexedDB" in window)) return;
+  const db = await openChatContextDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CHAT_CONTEXT_STORE, "readwrite");
+      tx.objectStore(CHAT_CONTEXT_STORE).delete(chatId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error("Could not clear local attachment context."));
+    });
+  } finally { db.close(); }
+}
+
 // Convert \( \) and \[ \] math delimiters (and bare bracket blocks) to $ and $$ so KaTeX renders them.
 function normalizeMath(text) {
   if (typeof text !== "string" || !text) return text;
@@ -758,7 +821,11 @@ export default function App() {
       startTyping(updatedMessages.length - 1, data.answer);
 
       // Keep the file in React state for subsequent follow-up questions.
-      if (attachments.length) setContextAttachments(attachments);
+      if (attachments.length) {
+        setContextAttachments(attachments);
+        try { await saveChatContext(chatId, attachments); }
+        catch (contextError) { console.warn("Could not persist local attachment context:", contextError.message); }
+      }
 
       setSelectedAttachments([]);
       await saveConversation(chatId, updatedMessages);
@@ -1117,8 +1184,11 @@ export default function App() {
     setError("");
     setCopiedIndex(-1);
     setSelectedAttachments([]);
-    // Saved history intentionally doesn't contain the actual file bytes.
+    // Restore private local attachment bytes for follow-up questions.
     setContextAttachments([]);
+    loadChatContext(chat.id)
+      .then((attachments) => { if (attachments.length) setContextAttachments(attachments); })
+      .catch((contextError) => console.warn("Could not restore local attachment context:", contextError.message));
     setSidebarOpen(false);
     setViewerImageUrl("");
     setTyping(null);
@@ -1142,6 +1212,7 @@ export default function App() {
     if (!window.confirm("Delete this conversation permanently?")) return;
 
     await deleteChatFromDatabase(chatId);
+    deleteChatContext(chatId).catch((contextError) => console.warn("Could not clear local attachment context:", contextError.message));
 
     if (currentChatId === chatId) {
       setCurrentChatId(null);
