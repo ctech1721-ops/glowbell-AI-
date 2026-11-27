@@ -54,12 +54,14 @@ if ((process.env.AUTH_JWT_SECRET?.trim().length || 0) < 32) {
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY?.trim();
 const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
+const IMAGE_GEMINI_API_KEY = process.env.IMAGE_GEMINI_API_KEY?.trim();
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN?.trim();
 
 const TAVILY_URL = "https://api.tavily.com/search";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
+const IMAGE_GEMINI_MODEL = process.env.IMAGE_GEMINI_MODEL?.trim() || GEMINI_MODEL;
 const CLOUDFLARE_AI_MODEL = process.env.CLOUDFLARE_AI_MODEL?.trim() || "@cf/zai-org/glm-4.7-flash";
 const GROQ_MODEL = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
 const CHAT_MAX_OUTPUT_TOKENS = Math.min(
@@ -251,13 +253,14 @@ async function requestFromGroq(messages, options = {}) {
   return content.trim();
 }
 
-async function requestFromGemini(messages, options = {}) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+async function requestFromGemini(messages, options = {}, apiKey = GEMINI_API_KEY, model = GEMINI_MODEL) {
+  if (!apiKey) throw new Error("Gemini API key is not configured.");
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": GEMINI_API_KEY,
+      "x-goog-api-key": apiKey,
     },
     body: JSON.stringify(toGeminiRequest(messages, options)),
     signal: AbortSignal.timeout(options.timeoutMs || 60000),
@@ -311,6 +314,25 @@ async function requestFromCloudflare(messages, options = {}) {
 }
 
 async function callAI(messages, options = {}) {
+  // Image analysis uses its own Gemini credential and does not consume
+  // Groq quota or the existing text-chat Gemini fallback key.
+  if (options.hasImages) {
+    if (!IMAGE_GEMINI_API_KEY) {
+      const error = new Error("Image analysis is not configured. Add IMAGE_GEMINI_API_KEY to the server environment.");
+      error.status = 503;
+      error.code = "IMAGE_GEMINI_NOT_CONFIGURED";
+      throw error;
+    }
+    const content = await requestFromGemini(
+      messages,
+      options,
+      IMAGE_GEMINI_API_KEY,
+      IMAGE_GEMINI_MODEL
+    );
+    console.info("[AI Router] Dedicated image Gemini answered successfully.");
+    return { content, provider: "Gemini Image" };
+  }
+
   const providers = [];
   if (GROQ_API_KEY) providers.push({ name: "Groq", run: () => requestFromGroq(messages, options) });
   if (GEMINI_API_KEY) providers.push({ name: "Gemini", run: () => requestFromGemini(messages, options) });
@@ -1867,8 +1889,15 @@ async function askGroq({
   mathQuestion = false,
 }) {
   const hasImages = imageDataUrls.length > 0;
-  if (!GROQ_API_KEY && !GEMINI_API_KEY && !(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN)) {
-    throw new Error("Configure at least one AI provider: Groq, Gemini, or Cloudflare Workers AI.");
+  if (
+    (hasImages && !IMAGE_GEMINI_API_KEY) ||
+    (!hasImages && !GROQ_API_KEY && !GEMINI_API_KEY && !(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN))
+  ) {
+    throw new Error(
+      hasImages
+        ? "Image analysis is not configured. Add IMAGE_GEMINI_API_KEY to the server environment."
+        : "Configure at least one AI provider: Groq, Gemini, or Cloudflare Workers AI."
+    );
   }
 
   const userContent = [
@@ -1897,16 +1926,6 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
     });
   }
 
-  // Image requests already carry image tokens, so keep only a small recent
-  // text history to stay within provider input-token limits. Text-only chats
-  // retain the existing full history behavior.
-  const requestHistory = hasImages
-    ? history.slice(-2).map((item) => ({
-        ...item,
-        content: String(item.content || "").slice(-600),
-      }))
-    : history;
-
   const messages = [
     {
       role: "system",
@@ -1920,7 +1939,7 @@ Follow the language rules. Use English letters only. Never output Tamil-script c
           ? "\n\nThis question involves maths or calculation. Answer with numbered steps (Step 1, Step 2, ...), each with a short bold title and a numeric display equation ($$ on its own lines), then a Final Answer. Never write calculations in words or plain text."
           : ""),
     },
-    ...requestHistory,
+    ...history,
     {
       role: "user",
       content: userContent,
@@ -2227,6 +2246,7 @@ app.get("/api/health", (_req, res) => {
     aiProviders: {
       groq: Boolean(GROQ_API_KEY),
       gemini: Boolean(GEMINI_API_KEY),
+      imageGemini: Boolean(IMAGE_GEMINI_API_KEY),
       cloudflare: Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN),
     },
   });
